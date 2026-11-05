@@ -192,17 +192,43 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
                                                 }
                                             },
                                             div { style: "display: flex; align-items: center; gap: 8px;",
-                                                span { class: "row-title",
-                                                    if is_dir { "📁 {name}" } else { "📄 {name}" }
+                                                if is_dir {
+                                                    svg {
+                                                        width: "15",
+                                                        height: "15",
+                                                        view_box: "0 0 24 24",
+                                                        fill: "none",
+                                                        stroke: "currentColor",
+                                                        stroke_width: "2",
+                                                        stroke_linecap: "round",
+                                                        stroke_linejoin: "round",
+                                                        style: "opacity: 0.7; flex-shrink: 0;",
+                                                        path { d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" }
+                                                    }
+                                                } else {
+                                                    svg {
+                                                        width: "15",
+                                                        height: "15",
+                                                        view_box: "0 0 24 24",
+                                                        fill: "none",
+                                                        stroke: "currentColor",
+                                                        stroke_width: "2",
+                                                        stroke_linecap: "round",
+                                                        stroke_linejoin: "round",
+                                                        style: "opacity: 0.6; flex-shrink: 0;",
+                                                        path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
+                                                        polyline { points: "14 2 14 8 20 8" }
+                                                    }
                                                 }
+                                                span { class: "row-title", "{name}" }
                                                 span {
                                                     style: "font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 3px; background: {cat_color}22; color: {cat_color}; border: 1px solid {cat_color}55;",
                                                     "{cat_label}"
                                                 }
                                                 if is_dev {
                                                     span {
-                                                        style: "font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px; background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.5);",
-                                                        "⚡ Dev Cache"
+                                                        style: "font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 3px; background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4);",
+                                                        "DEV ARTIFACT"
                                                     }
                                                 }
                                                 if is_dir {

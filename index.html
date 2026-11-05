@@ -3,195 +3,420 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sable — The Modern, Safe macOS Cleaner & System Utility</title>
-  <meta name="description" content="A blazing fast, private Mac utility built in Rust that inspects disk usage and safely cleans caches, leftovers, and heavy clutter.">
+  <title>Sable — Native macOS Disk Utility</title>
+  <meta name="description" content="A lightweight, high-performance Mac utility written in Rust. Reclaims disk space and analyzes system health with full safety.">
   <link rel="icon" type="image/png" href="assets/app_icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #090e0b;
-      --card: rgba(255, 255, 255, 0.04);
-      --card-border: rgba(30, 215, 96, 0.18);
+      --bg: #000000;
+      --surface-1: #0a0a0a;
+      --surface-2: #121212;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-hover: rgba(255, 255, 255, 0.16);
       --accent: #1ed760;
-      --accent-glow: rgba(30, 215, 96, 0.35);
-      --text: #ffffff;
-      --text-mute: #9aa89f;
-      --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --accent-dim: #10783e;
+      --text: #ededed;
+      --text-muted: #888888;
+      --text-sub: #555555;
     }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
       background-color: var(--bg);
-      background-image: radial-gradient(circle at 50% 0%, rgba(16, 120, 62, 0.25) 0%, transparent 60%);
       color: var(--text);
-      font-family: var(--font);
-      line-height: 1.6;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      line-height: 1.5;
       -webkit-font-smoothing: antialiased;
-      padding: 0 20px 80px;
+      padding: 0 24px;
     }
-    header {
-      max-width: 960px;
+
+    /* Ambient Spotlight */
+    .spotlight {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 1000px;
+      height: 480px;
+      background: radial-gradient(circle at 50% 20%, rgba(16, 120, 62, 0.18) 0%, transparent 65%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      max-width: 980px;
       margin: 0 auto;
-      padding: 60px 0 40px;
-      text-align: center;
+      position: relative;
+      z-index: 1;
     }
-    .logo {
-      width: 110px;
-      height: 110px;
-      border-radius: 26px;
-      box-shadow: 0 12px 36px var(--accent-glow);
-      margin-bottom: 24px;
-      transition: transform 0.25s ease;
-    }
-    .logo:hover { transform: scale(1.05) rotate(-2deg); }
-    h1 {
-      font-size: 3rem;
-      font-weight: 800;
-      letter-spacing: -0.04em;
-      margin-bottom: 12px;
-    }
-    h1 span { color: var(--accent); }
-    p.lead {
-      font-size: 1.25rem;
-      color: var(--text-mute);
-      max-width: 640px;
-      margin: 0 auto 32px;
-    }
-    .install-box {
-      background: rgba(0, 0, 0, 0.6);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 14px 20px;
-      display: inline-flex;
-      align-items: center;
-      gap: 14px;
-      font-family: ui-monospace, Menlo, Monaco, Consolas, monospace;
-      font-size: 0.95rem;
-      color: #3be477;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
-      margin-bottom: 40px;
-    }
-    .btn-group {
+
+    /* Navigation */
+    nav {
       display: flex;
-      gap: 14px;
-      justify-content: center;
-      flex-wrap: wrap;
-      margin-bottom: 60px;
-    }
-    .btn {
-      padding: 12px 24px;
-      border-radius: 999px;
-      font-weight: 600;
-      font-size: 1rem;
-      text-decoration: none;
-      transition: all 0.2s ease;
-      display: inline-flex;
+      justify-content: space-between;
       align-items: center;
-      gap: 8px;
+      padding: 24px 0;
+      border-bottom: 1px solid var(--border);
     }
-    .btn-primary {
-      background: var(--accent);
-      color: #000;
-      box-shadow: 0 4px 20px var(--accent-glow);
-    }
-    .btn-primary:hover {
-      background: #3be477;
-      transform: translateY(-2px);
-    }
-    .btn-secondary {
-      background: var(--card);
-      border: 1px solid rgba(255, 255, 255, 0.15);
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
       color: var(--text);
+      font-weight: 700;
+      font-size: 1.05rem;
+      letter-spacing: -0.02em;
     }
-    .btn-secondary:hover {
-      background: rgba(255, 255, 255, 0.08);
-      transform: translateY(-2px);
+    .nav-logo {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
     }
-    .grid {
-      max-width: 960px;
-      margin: 0 auto;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    .nav-links {
+      display: flex;
+      align-items: center;
       gap: 20px;
     }
-    .card {
-      background: var(--card);
-      border: 1px solid var(--card-border);
-      border-radius: 16px;
-      padding: 24px;
-      backdrop-filter: blur(12px);
+    .nav-link {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: color 0.15s;
     }
-    .card h3 {
-      font-size: 1.15rem;
-      margin-bottom: 8px;
-      color: var(--text);
-      display: flex;
+    .nav-link:hover { color: var(--text); }
+
+    /* Hero */
+    header {
+      padding: 80px 0 64px;
+      text-align: center;
+    }
+    .badge {
+      display: inline-flex;
       align-items: center;
       gap: 8px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--accent);
+      margin-bottom: 24px;
     }
-    .card p {
-      font-size: 0.95rem;
-      color: var(--text-mute);
+    .badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
     }
-    footer {
-      max-width: 960px;
-      margin: 60px auto 0;
-      text-align: center;
+
+    h1 {
+      font-size: 3.5rem;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      line-height: 1.1;
+      margin-bottom: 20px;
+    }
+    .hero-sub {
+      font-size: 1.15rem;
+      color: var(--text-muted);
+      max-width: 580px;
+      margin: 0 auto 36px;
+      font-weight: 400;
+    }
+
+    /* Terminal installer widget */
+    .terminal-box {
+      display: inline-flex;
+      align-items: center;
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 4px 4px 4px 16px;
+      gap: 16px;
+      max-width: 100%;
+      margin-bottom: 32px;
+      transition: border-color 0.2s;
+    }
+    .terminal-box:hover { border-color: var(--border-hover); }
+    .terminal-code {
+      font-family: 'JetBrains Mono', monospace;
       font-size: 0.85rem;
-      color: var(--text-mute);
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-      padding-top: 30px;
+      color: #999;
+      user-select: all;
     }
-    footer a { color: var(--accent); text-decoration: none; }
+    .terminal-code span { color: var(--accent); }
+    .copy-btn {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .copy-btn:hover { background: #1c1c1c; border-color: rgba(255,255,255,0.2); }
+
+    /* Action buttons */
+    .actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 72px;
+    }
+    .btn-main {
+      background: var(--text);
+      color: #000;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: opacity 0.15s;
+    }
+    .btn-main:hover { opacity: 0.9; }
+    .btn-ghost {
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 500;
+      font-size: 0.9rem;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.15s;
+    }
+    .btn-ghost:hover { border-color: var(--border-hover); background: var(--surface-2); }
+
+    /* Features Grid */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 96px;
+    }
+    .card {
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: border-color 0.2s;
+    }
+    .card:hover { border-color: var(--border-hover); }
+    .card-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+    }
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .card-desc {
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* Safety Banner */
+    .safety-strip {
+      background: linear-gradient(180deg, var(--surface-1) 0%, #080808 100%);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 32px;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 24px;
+      align-items: center;
+      margin-bottom: 96px;
+    }
+    .safety-badge {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: rgba(30, 215, 96, 0.1);
+      border: 1px solid rgba(30, 215, 96, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+    }
+    .safety-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .safety-sub {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 36px 0 48px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+      color: var(--text-sub);
+    }
+    footer a { color: var(--text-muted); text-decoration: none; }
+    footer a:hover { color: var(--text); }
+
+    @media (max-width: 820px) {
+      h1 { font-size: 2.5rem; }
+      .grid { grid-template-columns: 1fr; }
+      .safety-strip { grid-template-columns: 1fr; }
+      footer { flex-direction: column; gap: 16px; text-align: center; }
+    }
   </style>
 </head>
 <body>
-  <header>
-    <img src="assets/app_icon.png" alt="Sable Mascot" class="logo">
-    <h1>Meet <span>Sable</span></h1>
-    <p class="lead">A fast, private macOS cleaner built in Rust. Inspect disk usage, remove app leftovers, and trash safe caches with zero telemetry.</p>
-    
-    <div class="install-box">
-      <span>curl -sSL https://raw.githubusercontent.com/h3ma209/Sable/master/install.sh | bash</span>
-    </div>
-
-    <div class="btn-group">
-      <a href="https://github.com/h3ma209/Sable/releases/latest" class="btn btn-primary">
-        Download for macOS (.dmg)
+  <div class="spotlight"></div>
+  <div class="container">
+    <nav>
+      <a href="#" class="nav-brand">
+        <img src="assets/app_icon.png" alt="Sable" class="nav-logo">
+        <span>Sable</span>
       </a>
-      <a href="https://github.com/h3ma209/Sable" class="btn btn-secondary">
-        View on GitHub
-      </a>
-    </div>
-  </header>
+      <div class="nav-links">
+        <a href="#features" class="nav-link">Features</a>
+        <a href="https://github.com/h3ma209/Sable/releases" class="nav-link">Releases</a>
+        <a href="https://github.com/h3ma209/Sable" class="nav-link">Source</a>
+      </div>
+    </nav>
 
-  <main class="grid">
-    <div class="card">
-      <h3>🧹 Safe Cache & Log Cleaning</h3>
-      <p>Clean user caches, Xcode DerivedData, Spotify caches, and crash logs. Everything goes to macOS Trash first so nothing is permanently destroyed without your say.</p>
-    </div>
-    <div class="card">
-      <h3>🔍 Space Lens</h3>
-      <p>Instant disk mapping with interactive clickable breadcrumbs, category-coded tags, real-time search, and direct Finder reveal.</p>
-    </div>
-    <div class="card">
-      <h3>📦 App Leftover Sweep</h3>
-      <p>Tracks down remnants left behind by uninstalled applications across Application Support, Group Containers, HTTPStorages, and WebKit.</p>
-    </div>
-    <div class="card">
-      <h3>⚡ System Telemetry</h3>
-      <p>Live processor and memory monitoring with auto-refresh every 2 seconds to see how hard your Mac is working.</p>
-    </div>
-    <div class="card">
-      <h3>🛡️ Threat Hash Scan</h3>
-      <p>Quick signature comparison against known malware hashes under your Downloads folder.</p>
-    </div>
-    <div class="card">
-      <h3>🔒 Completely Private</h3>
-      <p>Built with 100% native Rust. No trackers, no ad networks, no analytics, no subscription locks.</p>
-    </div>
-  </main>
+    <header>
+      <div class="badge">
+        <span class="badge-dot"></span>
+        <span>Version 0.1.0 · macOS 12+</span>
+      </div>
+      <h1>Lightweight disk control<br>for Apple Silicon & Intel.</h1>
+      <p class="hero-sub">Sable audits disk storage, detects residual uninstaller clutter, and sweeps caches directly to the Trash with zero analytics.</p>
 
-  <footer>
-    <p>Released under the MIT License · Made for macOS with Rust & Dioxus · <a href="https://github.com/h3ma209/Sable">GitHub Repository</a></p>
-  </footer>
+      <div class="terminal-box">
+        <div class="terminal-code">
+          curl -sSL <span>https://raw.githubusercontent.com/h3ma209/Sable/master/install.sh</span> | bash
+        </div>
+        <button class="copy-btn" onclick="navigator.clipboard.writeText('curl -sSL https://raw.githubusercontent.com/h3ma209/Sable/master/install.sh | bash'); this.innerText='Copied!'; setTimeout(() => this.innerText='Copy', 2000)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+          Copy
+        </button>
+      </div>
+
+      <div class="actions">
+        <a href="https://github.com/h3ma209/Sable/releases/latest" class="btn-main">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+          Download .dmg
+        </a>
+        <a href="https://github.com/h3ma209/Sable" class="btn-ghost">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+          GitHub
+        </a>
+      </div>
+    </header>
+
+    <div id="features" class="grid">
+      <!-- 1. Cache Sweeper -->
+      <div class="card">
+        <div class="card-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+        </div>
+        <div class="card-title">Cache & Log Sweeper</div>
+        <div class="card-desc">Measures user caches, diagnostic crash logs, and Xcode DerivedData with safe 1-click batch cleanup.</div>
+      </div>
+
+      <!-- 2. Space Lens -->
+      <div class="card">
+        <div class="card-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        </div>
+        <div class="card-title">Space Lens</div>
+        <div class="card-desc">Cached volume map. Inspect directory trees, filter by name, view category weights, and reveal files in Finder.</div>
+      </div>
+
+      <!-- 3. Leftover Inspector -->
+      <div class="card">
+        <div class="card-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+        </div>
+        <div class="card-title">Leftover Detection</div>
+        <div class="card-desc">Audits bundle ID traces across Application Support, Group Containers, HTTPStorages, and WebKit roots.</div>
+      </div>
+
+      <!-- 4. System Monitor -->
+      <div class="card">
+        <div class="card-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        </div>
+        <div class="card-title">Telemetry Monitor</div>
+        <div class="card-desc">Continuous real-time telemetry sampling processor load and memory usage every 2 seconds.</div>
+      </div>
+
+      <!-- 5. Maintenance Tools -->
+      <div class="card">
+        <div class="card-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+        <div class="card-title">Tune-Up & Startup</div>
+        <div class="card-desc">Inspect launch agents, flush DNS resolution caches, and check Spotlight indexing states cleanly.</div>
+      </div>
+
+      <!-- 6. Threat Scan -->
+      <div class="card">
+        <div class="card-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/></svg>
+        </div>
+        <div class="card-title">Threat Check</div>
+        <div class="card-desc">Verifies executable hashes in Downloads against known signature collections in seconds.</div>
+      </div>
+    </div>
+
+    <!-- Safety Architecture -->
+    <div class="safety-strip">
+      <div class="safety-badge">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>
+      </div>
+      <div>
+        <div class="safety-title">Guaranteed Recovery Architecture</div>
+        <div class="safety-sub">Sable never calls permanent deletion flags. All deletions pipe directly into macOS Trash via native Finder integration, guaranteeing full recovery at any point.</div>
+      </div>
+    </div>
+
+    <footer>
+      <div>Sable is open source software released under the MIT License.</div>
+      <div><a href="https://github.com/h3ma209/Sable">GitHub Repository</a></div>
+    </footer>
+  </div>
 </body>
 </html>
