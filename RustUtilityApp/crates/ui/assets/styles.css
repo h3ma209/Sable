@@ -239,15 +239,9 @@ button:disabled {
 .brand-mark {
   width: 40px;
   height: 40px;
-  border-radius: 50%;
-  background: linear-gradient(145deg, #1ed760, #0f8f3a);
+  border-radius: 10px;
+  object-fit: cover;
   box-shadow: var(--shadow-green), inset 0 1px 0 rgba(255, 255, 255, 0.25);
-  display: grid;
-  place-items: center;
-  color: #000;
-  font-weight: 600;
-  font-size: 16px;
-  letter-spacing: -0.04em;
   transition: transform 280ms var(--ease-spring), box-shadow 280ms var(--ease);
 }
 

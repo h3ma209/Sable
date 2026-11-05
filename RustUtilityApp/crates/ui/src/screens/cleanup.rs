@@ -11,6 +11,7 @@ pub fn CleanupScreen(mut state: Signal<AppState>) -> Element {
     let home = state.read().home.clone();
     let junk = state.read().junk.clone();
     let total: u64 = junk.iter().map(|j| j.bytes).sum();
+    let junk_for_action = junk.clone();
 
     rsx! {
         PageHeader {
@@ -39,8 +40,26 @@ pub fn CleanupScreen(mut state: Signal<AppState>) -> Element {
                 }
             }
         } else {
-            div { class: "summary-bar",
+            div { class: "summary-bar", style: "display: flex; justify-content: space-between; align-items: center;",
                 span { strong { "{format_bytes(total)}" } " reclaimable across {junk.len()} folders" }
+                button {
+                    class: "btn btn-danger",
+                    disabled: busy || junk_for_action.is_empty(),
+                    onclick: move |_| {
+                        let existing_paths: Vec<_> = junk_for_action.iter().filter(|j| j.exists).map(|j| j.path.clone()).collect();
+                        let count = existing_paths.len();
+                        state.write().confirm = Some(Confirm {
+                            heading: format!("Clean All ({count} folders)?"),
+                            body: format!(
+                                "Move {count} cache and log folders ({}) to Trash? You can restore them from Trash if needed.",
+                                format_bytes(total)
+                            ),
+                            action: "Clean All to Trash",
+                            kind: ConfirmKind::TrashRoots(existing_paths),
+                        });
+                    },
+                    "Clean All"
+                }
             }
             div { class: "card",
                 for item in junk {

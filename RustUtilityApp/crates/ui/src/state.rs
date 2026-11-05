@@ -100,7 +100,9 @@ pub struct Notice {
 #[derive(Clone)]
 pub enum ConfirmKind {
     TrashRoot(PathBuf),
+    TrashRoots(Vec<PathBuf>),
     TrashDownload(PathBuf),
+    #[allow(dead_code)]
     TrashSpace(Vec<PathBuf>),
     TrashThreat(PathBuf),
     Reindex,
@@ -164,9 +166,13 @@ pub struct AppState {
     pub last_refresh: Option<Instant>,
     pub space_history: Vec<String>,
     pub space_future: Vec<String>,
+    pub space_filter: String,
+    pub space_sort: usize, // 0 = Size desc, 1 = Name asc, 2 = Type
     pub apps_tab: usize,
     pub perf_tab: usize,
     pub clutter_tab: usize,
+    pub clutter_filter: String,
+    pub auto_poll_monitor: bool,
     #[allow(dead_code)]
     pub malware_show_skipped: bool,
 }
@@ -226,9 +232,13 @@ impl AppState {
             last_refresh: None,
             space_history: Vec::new(),
             space_future: Vec::new(),
+            space_filter: String::new(),
+            space_sort: 0,
             apps_tab: 0,
             perf_tab: 0,
             clutter_tab: 0,
+            clutter_filter: String::new(),
+            auto_poll_monitor: true,
             malware_show_skipped: false,
         }
     }

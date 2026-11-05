@@ -7,61 +7,93 @@
 .Trashes
 .fseventsd
 
-# Editors
+# IDEs & Editors
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+*.sublime-project
+*.sublime-workspace
 .project
 .classpath
 .settings/
 
-# Secrets
+# Secrets & Local Env
 .env
 .env.*
 !.env.example
 *.pem
 *.key
 *.p12
+*.pfx
+*.keystore
 credentials.json
 secrets.json
+*.provisionprofile
 
-# Logs
+# Logs & Diagnostics
 *.log
+*.log.*
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+*.stackdump
 
-# Rust
+# Rust build artifacts
 target/
+**/target/
 **/*.rs.bk
 *.pdb
 
-# Node / TypeScript / Electron
-node_modules/
+# Build output & Distribution
 dist/
-out/
+**/dist/
 build/
+out/
+*.dmg
+*.app
+*.zip
+*.tar.gz
+
+# Node / Web
+node_modules/
 *.tsbuildinfo
 .npm/
 .yarn/
 .pnp.*
 
-# Native / RE artifacts
+# Native binaries & debug symbols
 *.dSYM/
 *.o
 *.a
 *.dylib
 *.so
 *.exe
-CustomUtilityApp/backend/custom-utility-engine
+*.dll
 
-# Ghidra
+# Reverse Engineering / Decompiler tool artifacts (Strict IP protection)
+*Ghidra*
+*ghidra*
 *.gpr
 *.rep/
-ghidra_projects/
-
-# Local research notes. Not part of the app.
+*.idb
+*.i64
+*.nam
+*.til
+*.dump
+*.macho
+*.bin
+*.nib
+*.strings
+*.car
+*_RE/
+*audit*
+*briefing*
+*crack*
+*decomp*
+*disasm*
 Sable_RE/
+ui-audit/
+UI_BRIEFING.md
 Sable_5_MAS_REA_Structural_Report.md

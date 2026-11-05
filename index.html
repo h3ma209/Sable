@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sable — The Modern, Safe macOS Cleaner & System Utility</title>
+  <meta name="description" content="A blazing fast, private Mac utility built in Rust that inspects disk usage and safely cleans caches, leftovers, and heavy clutter.">
+  <link rel="icon" type="image/png" href="assets/app_icon.png">
+  <style>
+    :root {
+      --bg: #090e0b;
+      --card: rgba(255, 255, 255, 0.04);
+      --card-border: rgba(30, 215, 96, 0.18);
+      --accent: #1ed760;
+      --accent-glow: rgba(30, 215, 96, 0.35);
+      --text: #ffffff;
+      --text-mute: #9aa89f;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      background-image: radial-gradient(circle at 50% 0%, rgba(16, 120, 62, 0.25) 0%, transparent 60%);
+      color: var(--text);
+      font-family: var(--font);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      padding: 0 20px 80px;
+    }
+    header {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 60px 0 40px;
+      text-align: center;
+    }
+    .logo {
+      width: 110px;
+      height: 110px;
+      border-radius: 26px;
+      box-shadow: 0 12px 36px var(--accent-glow);
+      margin-bottom: 24px;
+      transition: transform 0.25s ease;
+    }
+    .logo:hover { transform: scale(1.05) rotate(-2deg); }
+    h1 {
+      font-size: 3rem;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      margin-bottom: 12px;
+    }
+    h1 span { color: var(--accent); }
+    p.lead {
+      font-size: 1.25rem;
+      color: var(--text-mute);
+      max-width: 640px;
+      margin: 0 auto 32px;
+    }
+    .install-box {
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 14px 20px;
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      font-family: ui-monospace, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.95rem;
+      color: #3be477;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+      margin-bottom: 40px;
+    }
+    .btn-group {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 60px;
+    }
+    .btn {
+      padding: 12px 24px;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 1rem;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #000;
+      box-shadow: 0 4px 20px var(--accent-glow);
+    }
+    .btn-primary:hover {
+      background: #3be477;
+      transform: translateY(-2px);
+    }
+    .btn-secondary {
+      background: var(--card);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: var(--text);
+    }
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.08);
+      transform: translateY(-2px);
+    }
+    .grid {
+      max-width: 960px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 24px;
+      backdrop-filter: blur(12px);
+    }
+    .card h3 {
+      font-size: 1.15rem;
+      margin-bottom: 8px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card p {
+      font-size: 0.95rem;
+      color: var(--text-mute);
+    }
+    footer {
+      max-width: 960px;
+      margin: 60px auto 0;
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--text-mute);
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding-top: 30px;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="assets/app_icon.png" alt="Sable Mascot" class="logo">
+    <h1>Meet <span>Sable</span></h1>
+    <p class="lead">A fast, private macOS cleaner built in Rust. Inspect disk usage, remove app leftovers, and trash safe caches with zero telemetry.</p>
+    
+    <div class="install-box">
+      <span>curl -sSL https://raw.githubusercontent.com/h3ma209/Sable/master/install.sh | bash</span>
+    </div>
+
+    <div class="btn-group">
+      <a href="https://github.com/h3ma209/Sable/releases/latest" class="btn btn-primary">
+        Download for macOS (.dmg)
+      </a>
+      <a href="https://github.com/h3ma209/Sable" class="btn btn-secondary">
+        View on GitHub
+      </a>
+    </div>
+  </header>
+
+  <main class="grid">
+    <div class="card">
+      <h3>🧹 Safe Cache & Log Cleaning</h3>
+      <p>Clean user caches, Xcode DerivedData, Spotify caches, and crash logs. Everything goes to macOS Trash first so nothing is permanently destroyed without your say.</p>
+    </div>
+    <div class="card">
+      <h3>🔍 Space Lens</h3>
+      <p>Instant disk mapping with interactive clickable breadcrumbs, category-coded tags, real-time search, and direct Finder reveal.</p>
+    </div>
+    <div class="card">
+      <h3>📦 App Leftover Sweep</h3>
+      <p>Tracks down remnants left behind by uninstalled applications across Application Support, Group Containers, HTTPStorages, and WebKit.</p>
+    </div>
+    <div class="card">
+      <h3>⚡ System Telemetry</h3>
+      <p>Live processor and memory monitoring with auto-refresh every 2 seconds to see how hard your Mac is working.</p>
+    </div>
+    <div class="card">
+      <h3>🛡️ Threat Hash Scan</h3>
+      <p>Quick signature comparison against known malware hashes under your Downloads folder.</p>
+    </div>
+    <div class="card">
+      <h3>🔒 Completely Private</h3>
+      <p>Built with 100% native Rust. No trackers, no ad networks, no analytics, no subscription locks.</p>
+    </div>
+  </main>
+
+  <footer>
+    <p>Released under the MIT License · Made for macOS with Rust & Dioxus · <a href="https://github.com/h3ma209/Sable">GitHub Repository</a></p>
+  </footer>
+</body>
+</html>

@@ -21,6 +21,9 @@ const LEFTOVER_ROOTS: &[(&str, &str)] = &[
     ("Caches", "Library/Caches"),
     ("Logs", "Library/Logs"),
     ("Containers", "Library/Containers"),
+    ("Group Containers", "Library/Group Containers"),
+    ("HTTPStorages", "Library/HTTPStorages"),
+    ("WebKit", "Library/WebKit"),
 ];
 
 /// Counts files whose names contain `bundle_id` under the library roots named in the applications spec.

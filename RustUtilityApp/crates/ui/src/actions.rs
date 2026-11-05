@@ -33,7 +33,7 @@ pub fn load(mut state: Signal<AppState>, screen: Screen) {
     }
 }
 
-pub fn ensure_auto_load(mut state: Signal<AppState>) {
+pub fn ensure_auto_load(state: Signal<AppState>) {
     if state.read().busy {
         return;
     }
@@ -197,6 +197,39 @@ pub fn trash(mut state: Signal<AppState>, path: PathBuf) {
                 text: err,
                 refresh: None,
             },
+        };
+        apply_notice(state, notice);
+    });
+}
+
+pub fn trash_roots(mut state: Signal<AppState>, paths: Vec<PathBuf>) {
+    if state.read().busy || paths.is_empty() {
+        return;
+    }
+    let home = state.read().home.clone();
+    arm(&mut state.write());
+    state.write().status = "cleaning";
+    spawn(async move {
+        let mut count = 0;
+        let mut last_err = None;
+        for path in paths {
+            match move_root_to_trash(&home, &path) {
+                Ok(()) => count += 1,
+                Err(e) => last_err = Some(e),
+            }
+        }
+        let notice = if count > 0 {
+            Notice {
+                ok: true,
+                text: format!("Moved {count} folders to the Trash. Open Trash to put them back."),
+                refresh: Some(Screen::Cleanup),
+            }
+        } else {
+            Notice {
+                ok: false,
+                text: last_err.unwrap_or_else(|| "Failed to move folders to Trash.".into()),
+                refresh: None,
+            }
         };
         apply_notice(state, notice);
     });
@@ -747,9 +780,10 @@ pub fn start_scan(mut state: Signal<AppState>) {
     });
 }
 
-pub fn perform_confirm(mut state: Signal<AppState>, kind: ConfirmKind) {
+pub fn perform_confirm(state: Signal<AppState>, kind: ConfirmKind) {
     match kind {
         ConfirmKind::TrashRoot(path) => trash(state, path),
+        ConfirmKind::TrashRoots(paths) => trash_roots(state, paths),
         ConfirmKind::TrashDownload(path) => trash_download(state, path),
         ConfirmKind::TrashSpace(paths) => trash_space(state, paths),
         ConfirmKind::TrashThreat(path) => trash_threat(state, path),

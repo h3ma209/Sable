@@ -9,15 +9,28 @@ use crate::util::{format_bytes, gauge_class};
 pub fn AssistantScreen(mut state: Signal<AppState>) -> Element {
     let busy = state.read().busy;
     let sample = state.read().sample;
+    let auto_poll = state.read().auto_poll_monitor;
+
+    use_future(move || async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+            if state.read().screen == Screen::Assistant && state.read().auto_poll_monitor && !state.read().busy {
+                sample_machine(state);
+            }
+        }
+    });
 
     rsx! {
         PageHeader {
             screen: Screen::Assistant,
-            subtitle: "How hard your Mac is working right now. Press Refresh for a new reading.",
+            subtitle: "Live telemetry of processor and memory. Auto-refreshes every 2 seconds.",
             safety: Safety::ReadOnly,
-            action_label: Some("Refresh".into()),
+            action_label: Some(if auto_poll { "Pause Live" } else { "Resume Live" }.into()),
             action_enabled: !busy,
-            on_action: Some(EventHandler::new(move |_| sample_machine(state))),
+            on_action: Some(EventHandler::new(move |_| {
+                let current = state.read().auto_poll_monitor;
+                state.write().auto_poll_monitor = !current;
+            })),
         }
         NoticeBanner { state }
 

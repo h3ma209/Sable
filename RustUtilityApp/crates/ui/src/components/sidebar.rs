@@ -2,6 +2,8 @@ use dioxus::prelude::*;
 
 use crate::state::{rail_groups, AppState};
 
+const APP_ICON: Asset = asset!("/assets/app_icon.png");
+
 #[component]
 pub fn Sidebar(state: Signal<AppState>) -> Element {
     let screen = state.read().screen;
@@ -19,7 +21,13 @@ pub fn Sidebar(state: Signal<AppState>) -> Element {
     rsx! {
         aside { class: "rail",
             div { class: "brand",
-                div { class: "brand-mark", "C" }
+                img {
+                    class: "brand-mark",
+                    src: APP_ICON,
+                    alt: "Sable logo",
+                    width: "40",
+                    height: "40",
+                }
                 div { class: "brand-text",
                     span { class: "brand-name", "Sable" }
                     span { class: "brand-sub", "Your Mac, remixed" }

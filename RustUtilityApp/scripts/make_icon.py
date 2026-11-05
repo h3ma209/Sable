@@ -1,71 +1,82 @@
 #!/usr/bin/env python3
-"""Draw the Sable mark into a macOS .iconset directory."""
+"""Build macOS iconset from the official Sable mascot image with deep emerald background."""
 
-import math
-import struct
 import sys
-import zlib
 from pathlib import Path
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
+import numpy as np
 
-GREEN = (0x1E, 0xD7, 0x60, 255)
-CLEAR = (0, 0, 0, 0)
-BLACK = (0, 0, 0, 255)
+def generate_base_icon() -> Image.Image:
+    repo_root = Path(__file__).resolve().parent.parent
+    src_path = repo_root / "assets" / "sable_mascot.jpg"
+    if not src_path.exists():
+        src_path = repo_root.parent / "RustUtilityApp" / "assets" / "sable_mascot.jpg"
 
+    src = Image.open(src_path).convert("RGBA")
 
-def png(size: int, pixel) -> bytes:
-    raw = bytearray()
-    for y in range(size):
-        raw.append(0)
-        for x in range(size):
-            raw.extend(pixel(x, y))
+    # Cut out exterior white background via floodfill
+    gray = src.convert("L")
+    bw = gray.point(lambda p: 255 if p > 235 else 0)
+    expanded = ImageOps.expand(bw, border=2, fill=255)
+    ImageDraw.floodfill(expanded, (0, 0), 128, thresh=10)
+    exterior_mask = expanded.crop((2, 2, 1026, 1026))
+    ext_arr = np.array(exterior_mask) == 128
 
-    def chunk(tag: bytes, data: bytes) -> bytes:
-        crc = zlib.crc32(tag + data) & 0xFFFFFFFF
-        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
+    alpha = np.where(ext_arr, 0, 255).astype(np.uint8)
+    mascot_alpha = Image.fromarray(alpha).filter(ImageFilter.GaussianBlur(0.8))
 
-    ihdr = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", ihdr)
-        + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
-        + chunk(b"IEND", b"")
+    mascot_cutout = src.copy()
+    mascot_cutout.putalpha(mascot_alpha)
+
+    # Rich, sophisticated deep emerald gradient background
+    # Top: #10783e (16, 120, 62) -> Bottom: #083e20 (8, 62, 32)
+    bg = Image.new("RGBA", (1024, 1024))
+    for y in range(1024):
+        t = y / 1023.0
+        r = int(16 * (1 - t) + 8 * t)
+        g = int(120 * (1 - t) + 62 * t)
+        b = int(62 * (1 - t) + 32 * t)
+        ImageDraw.Draw(bg).line([(0, y), (1024, y)], fill=(r, g, b, 255))
+
+    # Squircle mask (standard macOS squircle)
+    mask = Image.new("L", (1024, 1024), 0)
+    draw = ImageDraw.Draw(mask)
+    margin = 72
+    draw.rounded_rectangle(
+        [margin, margin, 1024 - margin, 1024 - margin],
+        radius=195,
+        fill=255,
     )
 
+    icon = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    icon.paste(bg, (0, 0), mask)
 
-def mark(size: int):
-    center = (size - 1) / 2
-    radius = size * 0.46
-    bar_w = max(1.0, radius * 0.28)
-    gap = radius * 0.22
-    heights = (0.42, 0.72, 0.54)
-    total = bar_w * 3 + gap * 2
-    left = center - total / 2
+    # Subtle inner bevel outline
+    rim_draw = ImageDraw.Draw(icon)
+    rim_draw.rounded_rectangle(
+        [margin, margin, 1024 - margin, 1024 - margin],
+        radius=195,
+        outline=(255, 255, 255, 45),
+        width=2,
+    )
 
-    def inside_bar(x: float, y: float) -> bool:
-        for index, height in enumerate(heights):
-            h = radius * 1.15 * height
-            bx = left + index * (bar_w + gap)
-            top = center + radius * 0.42 - h
-            bottom = top + h
-            if bx <= x <= bx + bar_w and top <= y <= bottom:
-                return True
-        return False
-
-    def at(x: int, y: int):
-        dx = x - center
-        dy = y - center
-        if math.hypot(dx, dy) > radius:
-            return CLEAR
-        if inside_bar(x, y):
-            return BLACK
-        return GREEN
-
-    return at
-
+    # Mascot overlay
+    mascot_scaled = mascot_cutout.resize((740, 740), Image.Resampling.LANCZOS)
+    offset_x = (1024 - 740) // 2
+    offset_y = (1024 - 740) // 2 - 8
+    icon.alpha_composite(mascot_scaled, (offset_x, offset_y))
+    return icon
 
 def main() -> None:
+    if len(sys.argv) < 2:
+        print("Usage: make_icon.py <output_iconset_dir>")
+        sys.exit(1)
+
     out = Path(sys.argv[1])
     out.mkdir(parents=True, exist_ok=True)
+
+    base = generate_base_icon()
+
     names = {
         16: ["icon_16x16.png"],
         32: ["icon_16x16@2x.png", "icon_32x32.png"],
@@ -75,11 +86,11 @@ def main() -> None:
         512: ["icon_256x256@2x.png", "icon_512x512.png"],
         1024: ["icon_512x512@2x.png"],
     }
-    for size, files in names.items():
-        data = png(size, mark(size))
-        for name in files:
-            (out / name).write_bytes(data)
 
+    for size, files in names.items():
+        resized = base.resize((size, size), Image.Resampling.LANCZOS)
+        for name in files:
+            resized.save(out / name, format="PNG")
 
 if __name__ == "__main__":
     main()

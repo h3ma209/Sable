@@ -13,7 +13,16 @@ pub fn ClutterScreen(mut state: Signal<AppState>) -> Element {
     let loaded = state.read().loaded.contains(&Screen::Clutter);
     let tab = state.read().clutter_tab;
 
-    let mut files = clutter;
+    let filter = state.read().clutter_filter.clone();
+
+    let mut files: Vec<_> = clutter
+        .into_iter()
+        .filter(|f| {
+            filter.is_empty()
+                || file_name(&f.path).to_lowercase().contains(&filter.to_lowercase())
+                || f.path.display().to_string().to_lowercase().contains(&filter.to_lowercase())
+        })
+        .collect();
     if tab == 1 {
         files.sort_by(|a, b| {
             file_name(&a.path)
@@ -49,6 +58,16 @@ pub fn ClutterScreen(mut state: Signal<AppState>) -> Element {
                 class: if tab == 1 { "tab active" } else { "tab" },
                 onclick: move |_| state.write().clutter_tab = 1,
                 "Name"
+            }
+        }
+
+        div { class: "toolbar",
+            input {
+                class: "field",
+                style: "max-width: 320px;",
+                placeholder: "Filter downloads by name…",
+                value: "{filter}",
+                oninput: move |e| state.write().clutter_filter = e.value(),
             }
         }
 

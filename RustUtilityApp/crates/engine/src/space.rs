@@ -9,7 +9,7 @@ use crate::cleanup::finder_trash;
 /// `SF_DATALESS`. The scan tests this bit of `st_flags` after `lstat`.
 const SF_DATALESS: u32 = 0x40000000;
 
-/// Concurrent directory subtrees (matches CMM `maxConcurrentScans = 4`).
+/// Concurrent directory subtrees.
 const MAX_CONCURRENT_SCANS: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -120,6 +120,52 @@ pub fn gauge_class(fraction: f32) -> &'static str {
     }
 }
 
+pub fn is_dev_artifact(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    matches!(
+        lower.as_str(),
+        "node_modules"
+            | "target"
+            | ".gradle"
+            | ".venv"
+            | "venv"
+            | ".cargo"
+            | ".next"
+            | ".turbo"
+            | "build"
+            | "deriveddata"
+            | ".docker"
+            | ".rustup"
+            | ".pnpm-store"
+            | ".npm"
+            | ".m2"
+    )
+}
+
+pub fn space_category_style(is_dir: bool, name: &str) -> (&'static str, &'static str) {
+    if is_dev_artifact(name) {
+        return ("#f59e0b", "Dev Artifact"); // Amber
+    }
+    if is_dir {
+        return ("#10b981", "Folder"); // Emerald
+    }
+    let lower = name.to_lowercase();
+    let ext = lower.rsplit('.').next().unwrap_or("");
+    match ext {
+        "app" | "dmg" | "pkg" | "iso" => ("#8b5cf6", "App / Installer"), // Purple
+        "zip" | "tar" | "gz" | "bz2" | "xz" | "7z" | "rar" => ("#3b82f6", "Archive"), // Blue
+        "mp4" | "mov" | "mkv" | "avi" | "mp3" | "wav" | "flac" | "m4a" => ("#ec4899", "Media"), // Pink
+        "png" | "jpg" | "jpeg" | "webp" | "gif" | "svg" | "heic" | "psd" => ("#06b6d4", "Image"), // Cyan
+        "rs" | "js" | "ts" | "py" | "go" | "c" | "cpp" | "h" | "json" | "toml" | "yaml" | "yml" => {
+            ("#10b981", "Code") // Green
+        }
+        "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "txt" | "md" => {
+            ("#64748b", "Document") // Slate
+        }
+        _ => ("#94a3b8", "File"),
+    }
+}
+
 pub fn screen_kicker(screen: Screen) -> &'static str {
     match screen {
         Screen::Care => "Made for you",

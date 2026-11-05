@@ -32,9 +32,18 @@ rm -rf "$(dirname "$iconset")"
 sed "s/VERSION/${version}/g" "$root/packaging/macos/Info.plist" > "$app/Contents/Info.plist"
 plutil -lint "$app/Contents/Info.plist" >/dev/null
 
-# Ad-hoc signature. Gatekeeper still asks on first open of a downloaded build.
-codesign --force --sign - "$app"
+# Code signing: developer identity or fallback to ad-hoc.
+SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:--}"
+echo "Signing with identity: ${SIGNING_IDENTITY}"
+codesign --force --options runtime --sign "${SIGNING_IDENTITY}" "$app"
 codesign --verify --verbose=2 "$app"
+
+# Optional Apple notarization if NOTARIZE_PROFILE is configured
+if [[ -n "${NOTARIZE_PROFILE:-}" && "${SIGNING_IDENTITY}" != "-" ]]; then
+  echo "Submitting to Apple notary service using profile: ${NOTARIZE_PROFILE}"
+  xcrun notarytool submit "$app" --keychain-profile "${NOTARIZE_PROFILE}" --wait
+  xcrun stapler staple "$app"
+fi
 
 arch_name="$(uname -m)"
 case "$arch_name" in
