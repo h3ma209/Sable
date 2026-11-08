@@ -18,7 +18,7 @@ fn main() {
         .with_cfg(
             Config::new()
                 .with_custom_head(format!(
-                    "<style>{}</style>",
+                    r#"<meta name="color-scheme" content="dark"><style>{}</style>"#,
                     assets::STYLESHEET
                 ))
                 .with_window(

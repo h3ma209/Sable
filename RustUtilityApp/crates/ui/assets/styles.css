@@ -17,6 +17,7 @@
 }
 
 :root {
+  color-scheme: dark;
   /* Spotify black stack */
   --bg0: #050505;
   --bg1: #0a0a0a;
@@ -72,6 +73,41 @@
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+/* ── Custom Dark Glass Scrollbars ── */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 160ms var(--ease);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.32);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: var(--accent);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 html,

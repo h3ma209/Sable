@@ -1366,11 +1366,11 @@ mod tests {
 
     #[test]
     fn test_version_comparison() {
+        assert!(is_version_newer("0.3.6", "0.3.5"));
         assert!(is_version_newer("0.3.5", "0.3.4"));
-        assert!(is_version_newer("0.3.4", "0.3.3"));
         assert!(is_version_newer("1.0.0", "0.3.1"));
-        assert!(!is_version_newer("0.3.4", "0.3.4"));
-        assert!(!is_version_newer("0.3.3", "0.3.4"));
+        assert!(!is_version_newer("0.3.5", "0.3.5"));
+        assert!(!is_version_newer("0.3.4", "0.3.5"));
     }
 
     #[test]
