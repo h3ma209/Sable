@@ -293,8 +293,24 @@
     footer a { color: var(--text-muted); text-decoration: none; }
     footer a:hover { color: var(--text); }
 
+    /* Hero Preview */
+    .hero-preview {
+      margin: 40px auto 64px;
+      max-width: 980px;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 100px rgba(30, 215, 96, 0.08);
+    }
+    .hero-preview img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
     @media (max-width: 820px) {
       h1 { font-size: 2.5rem; }
+      .hero-preview { margin: 28px auto 44px; }
       .grid { grid-template-columns: 1fr; }
       .safety-strip { grid-template-columns: 1fr; }
       footer { flex-direction: column; gap: 16px; text-align: center; }
@@ -319,7 +335,7 @@
     <header>
       <div class="badge">
         <span class="badge-dot"></span>
-        <span>Version 0.2.0 · macOS 12+</span>
+        <span>Version 0.2.2 · macOS 12+</span>
       </div>
       <h1>Lightweight disk control<br>for Apple Silicon & Intel.</h1>
       <p class="hero-sub">Sable audits disk storage, detects residual uninstaller clutter, and sweeps caches directly to the Trash with zero analytics.</p>
@@ -343,6 +359,10 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
           GitHub
         </a>
+      </div>
+
+      <div class="hero-preview">
+        <img src="assets/preview.png" alt="Sable Space Lens UI" loading="lazy">
       </div>
     </header>
 

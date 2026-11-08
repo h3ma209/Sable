@@ -16,6 +16,10 @@
   <img src="https://img.shields.io/badge/platform-macOS%2012%2B-lightgrey?style=flat-square" alt="Platform">
 </p>
 
+<p align="center">
+  <img src="assets/preview.png" width="900" alt="Sable Space Lens UI" style="border-radius: 12px; box-shadow: 0 20px 40px rgba(0,0,0,0.4);">
+</p>
+
 ---
 
 ## ⚡ Quick Install (One-Liner)
