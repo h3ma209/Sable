@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/h3ma209/Sable/releases/latest"><img src="https://img.shields.io/github/v/release/h3ma209/Sable?color=1ed760&style=flat-square" alt="Latest Release"></a>
+  <a href="https://github.com/h3ma209/Sable/releases"><img src="https://img.shields.io/github/downloads/h3ma209/Sable/total?color=blue&style=flat-square" alt="Total Downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License"></a>
   <a href="https://h3ma209.github.io/Sable/"><img src="https://img.shields.io/badge/website-GitHub%20Pages-success?style=flat-square" alt="Website"></a>
   <img src="https://img.shields.io/badge/platform-macOS%2012%2B-lightgrey?style=flat-square" alt="Platform">

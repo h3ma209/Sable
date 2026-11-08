@@ -9,7 +9,7 @@ VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' crates/ui/Cargo.toml | he
 
 .DEFAULT_GOAL := all
 
-.PHONY: all help build release run run-release test check package install open clean
+.PHONY: all help build release run run-release test check package install open clean stats
 
 all: release
 
@@ -25,6 +25,7 @@ help:
 		'make package         Sable.app plus dmg and zip in dist/' \
 		'make install         package, then copy the app to $(PREFIX)' \
 		'make open            launch dist/Sable.app' \
+		'make stats           show release download rates and total' \
 		'make clean           delete target/ and dist/' \
 		'' \
 		'PREFIX=$(PREFIX)  VERSION=$(VERSION)'
@@ -58,6 +59,9 @@ install: package
 open:
 	@if [[ ! -d "$(APP)" ]]; then $(MAKE) package; fi
 	open "$(APP)"
+
+stats:
+	@./scripts/download-stats.sh
 
 clean:
 	$(CARGO) clean

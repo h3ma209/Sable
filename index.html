@@ -333,9 +333,15 @@
     </nav>
 
     <header>
-      <div class="badge">
-        <span class="badge-dot"></span>
-        <span>Version 0.3.7 · macOS 12+</span>
+      <div style="display: flex; gap: 10px; justify-content: center; align-items: center; margin-bottom: 24px; flex-wrap: wrap;">
+        <div class="badge" style="margin-bottom: 0;">
+          <span class="badge-dot"></span>
+          <span>Version 0.3.7 · macOS 12+</span>
+        </div>
+        <a href="https://github.com/h3ma209/Sable/releases" class="badge" style="margin-bottom: 0; text-decoration: none; color: var(--text-dim);" title="Total downloads across all releases">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+          <span id="download-count">40+ downloads</span>
+        </a>
       </div>
       <h1>Lightweight disk control<br>for Apple Silicon & Intel.</h1>
       <p class="hero-sub">Sable audits disk storage, detects residual uninstaller clutter, and sweeps caches directly to the Trash with zero analytics.</p>
@@ -438,5 +444,20 @@
       <div><a href="https://github.com/h3ma209/Sable">GitHub Repository</a></div>
     </footer>
   </div>
+  <script>
+    fetch('https://api.github.com/repos/h3ma209/Sable/releases')
+      .then(r => r.json())
+      .then(releases => {
+        if (!Array.isArray(releases)) return;
+        const total = releases.reduce((acc, rel) => {
+          return acc + (rel.assets || []).reduce((sum, a) => sum + (a.download_count || 0), 0);
+        }, 0);
+        if (total > 0) {
+          const el = document.getElementById('download-count');
+          if (el) el.textContent = total.toLocaleString() + ' downloads';
+        }
+      })
+      .catch(() => {});
+  </script>
 </body>
 </html>
