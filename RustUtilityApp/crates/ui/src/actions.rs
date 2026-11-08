@@ -824,8 +824,13 @@ pub fn perform_confirm(state: Signal<AppState>, kind: ConfirmKind) {
         ConfirmKind::TrashSpace(paths) => trash_space(state, paths),
         ConfirmKind::TrashThreat(path) => trash_threat(state, path),
         ConfirmKind::Reindex => run_tool(state, Tool::Reindex),
-        ConfirmKind::InstallUpdate { tag, download_url } => {
-            install_update(state, tag, download_url);
+        ConfirmKind::InstallUpdate {
+            tag,
+            download_url,
+            fallback_url,
+            is_dmg,
+        } => {
+            install_update(state, tag, download_url, fallback_url, is_dmg);
         }
     }
 }
@@ -864,6 +869,8 @@ pub fn check_for_updates(mut state: Signal<AppState>) {
                         kind: ConfirmKind::InstallUpdate {
                             tag: info.tag,
                             download_url: info.download_url,
+                            fallback_url: info.fallback_url,
+                            is_dmg: info.is_dmg,
                         },
                     });
                 } else {
@@ -877,6 +884,8 @@ pub fn check_for_updates(mut state: Signal<AppState>) {
                         kind: ConfirmKind::InstallUpdate {
                             tag: info.tag,
                             download_url: info.download_url,
+                            fallback_url: info.fallback_url,
+                            is_dmg: info.is_dmg,
                         },
                     });
                     s.notice = Some(Notice {
@@ -897,7 +906,13 @@ pub fn check_for_updates(mut state: Signal<AppState>) {
     });
 }
 
-pub fn install_update(mut state: Signal<AppState>, tag: String, download_url: String) {
+pub fn install_update(
+    mut state: Signal<AppState>,
+    tag: String,
+    download_url: String,
+    fallback_url: Option<String>,
+    is_dmg: bool,
+) {
     if state.read().busy {
         return;
     }
@@ -906,7 +921,7 @@ pub fn install_update(mut state: Signal<AppState>, tag: String, download_url: St
 
     spawn(async move {
         let result = tokio::task::spawn_blocking(move || {
-            perform_update_download_and_install(&tag, &download_url)
+            perform_update_download_and_install(&tag, &download_url, fallback_url.as_deref(), is_dmg)
         })
         .await
         .unwrap_or_else(|e| Err(format!("Task error: {e}")));
@@ -942,18 +957,21 @@ pub fn install_update(mut state: Signal<AppState>, tag: String, download_url: St
 struct ReleaseInfo {
     tag: String,
     download_url: String,
+    fallback_url: Option<String>,
+    is_dmg: bool,
 }
 
 fn fetch_latest_release_info() -> Result<ReleaseInfo, String> {
     let output = Command::new("curl")
         .args([
-            "-sSL",
+            "-fsSL",
+            "--retry", "2",
             "-H", "User-Agent: Sable-App",
             "-H", "Accept: application/vnd.github.v3+json",
             "https://api.github.com/repos/h3ma209/Sable/releases/latest",
         ])
         .output()
-        .map_err(|e| format!("Failed to run curl: {e}"))?;
+        .map_err(|e| format!("Failed to reach update server: {e}"))?;
 
     if !output.status.success() {
         return Err("Could not reach update server".into());
@@ -965,13 +983,89 @@ fn fetch_latest_release_info() -> Result<ReleaseInfo, String> {
     let tag = extract_json_field(&json, "tag_name")
         .ok_or_else(|| "Could not parse release tag from server".to_string())?;
 
-    let download_url = extract_download_url(&json).unwrap_or_else(|| {
-        let clean = tag.trim_start_matches('v');
-        let arch_label = if std::env::consts::ARCH == "x86_64" { "x64" } else { "arm64" };
-        format!("https://github.com/h3ma209/Sable/releases/download/{tag}/Sable-{clean}-macos-{arch_label}.zip")
-    });
+    let (download_url, fallback_url, is_dmg) = select_best_release_asset(&json, &tag);
 
-    Ok(ReleaseInfo { tag, download_url })
+    Ok(ReleaseInfo {
+        tag,
+        download_url,
+        fallback_url,
+        is_dmg,
+    })
+}
+
+fn select_best_release_asset(json: &str, tag: &str) -> (String, Option<String>, bool) {
+    let arch_keyword = if std::env::consts::ARCH == "x86_64" { "x64" } else { "arm64" };
+
+    struct Candidate {
+        api_url: String,
+        browser_url: String,
+        is_zip: bool,
+        is_dmg: bool,
+        is_arch: bool,
+    }
+
+    let mut candidates = Vec::new();
+
+    let marker = "\"url\":";
+    let mut slice = json;
+    while let Some(idx) = slice.find(marker) {
+        slice = &slice[idx + marker.len()..];
+        let Some(qs) = slice.find('"') else { continue };
+        let Some(qe) = slice[qs + 1..].find('"') else { continue };
+        let url = slice[qs + 1..qs + 1 + qe].to_string();
+        if !url.contains("/releases/assets/") {
+            continue;
+        }
+
+        let block_end = slice.find('}').unwrap_or(slice.len());
+        let block = &slice[..block_end];
+
+        let browser_url = if let Some(b_idx) = block.find("\"browser_download_url\":") {
+            let b_rest = &block[b_idx + 23..];
+            if let Some(b_qs) = b_rest.find('"') {
+                if let Some(b_qe) = b_rest[b_qs + 1..].find('"') {
+                    b_rest[b_qs + 1..b_qs + 1 + b_qe].to_string()
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        let is_arch = block.contains(arch_keyword);
+        let is_zip = block.contains(".zip");
+        let is_dmg = block.contains(".dmg");
+
+        candidates.push(Candidate {
+            api_url: url,
+            browser_url,
+            is_zip,
+            is_dmg,
+            is_arch,
+        });
+    }
+
+    if let Some(c) = candidates.iter().find(|c| c.is_arch && c.is_zip) {
+        let fallback = if !c.browser_url.is_empty() { Some(c.browser_url.clone()) } else { None };
+        return (c.api_url.clone(), fallback, false);
+    }
+
+    if let Some(c) = candidates.iter().find(|c| c.is_arch && c.is_dmg) {
+        let fallback = if !c.browser_url.is_empty() { Some(c.browser_url.clone()) } else { None };
+        return (c.api_url.clone(), fallback, true);
+    }
+
+    if let Some(c) = candidates.iter().find(|c| c.is_zip) {
+        let fallback = if !c.browser_url.is_empty() { Some(c.browser_url.clone()) } else { None };
+        return (c.api_url.clone(), fallback, false);
+    }
+
+    let clean = tag.trim_start_matches('v');
+    let fallback = format!("https://github.com/h3ma209/Sable/releases/download/{tag}/Sable-{clean}-macos-{arch_keyword}.zip");
+    (fallback, None, false)
 }
 
 fn extract_json_field(json: &str, key: &str) -> Option<String> {
@@ -983,58 +1077,102 @@ fn extract_json_field(json: &str, key: &str) -> Option<String> {
     Some(rest[quote_start + 1..quote_start + 1 + quote_end].to_string())
 }
 
-fn extract_download_url(json: &str) -> Option<String> {
-    let arch_keyword = if std::env::consts::ARCH == "x86_64" { "x64" } else { "arm64" };
-    let mut best_url: Option<String> = None;
-
-    let marker = "\"browser_download_url\":";
-    let mut slice = json;
-    while let Some(idx) = slice.find(marker) {
-        slice = &slice[idx + marker.len()..];
-        if let Some(quote_start) = slice.find('"') {
-            if let Some(quote_end) = slice[quote_start + 1..].find('"') {
-                let url = &slice[quote_start + 1..quote_start + 1 + quote_end];
-                if url.ends_with(".zip") {
-                    if url.contains(arch_keyword) {
-                        return Some(url.to_string());
-                    }
-                    if best_url.is_none() {
-                        best_url = Some(url.to_string());
-                    }
-                } else if url.ends_with(".dmg") && best_url.is_none() {
-                    best_url = Some(url.to_string());
-                }
-            }
-        }
-    }
-    best_url
-}
-
-fn perform_update_download_and_install(tag: &str, download_url: &str) -> Result<String, String> {
+fn perform_update_download_and_install(
+    tag: &str,
+    primary_url: &str,
+    fallback_url: Option<&str>,
+    is_dmg: bool,
+) -> Result<String, String> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let tmp_dir = std::env::temp_dir().join(format!("sable_update_{}_{}", std::process::id(), now));
     let _ = std::fs::create_dir_all(&tmp_dir);
-    let is_dmg = download_url.ends_with(".dmg");
-    let archive_path = tmp_dir.join(if is_dmg { "update.dmg" } else { "update.zip" });
+    let archive_path = tmp_dir.join("update.pkg");
     let unpack_dir = tmp_dir.join("unpacked");
     let _ = std::fs::create_dir_all(&unpack_dir);
 
-    let status = Command::new("curl")
-        .args(["-sSL", "-o"])
-        .arg(&archive_path)
-        .arg(download_url)
-        .status()
-        .map_err(|e| format!("curl download failed: {e}"))?;
-
-    if !status.success() {
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-        return Err("Failed to download release archive".into());
+    let mut urls_to_try = vec![primary_url];
+    if let Some(fb) = fallback_url {
+        if fb != primary_url {
+            urls_to_try.push(fb);
+        }
     }
 
-    let app_source = if is_dmg {
+    let mut downloaded = false;
+    let mut last_err = String::new();
+
+    for url in urls_to_try {
+        let _ = std::fs::remove_file(&archive_path);
+        let status = Command::new("curl")
+            .args([
+                "-fsSL",
+                "--retry", "3",
+                "--retry-delay", "1",
+                "-H", "Accept: application/octet-stream",
+                "-H", "User-Agent: Sable-Updater",
+                "-o",
+            ])
+            .arg(&archive_path)
+            .arg(url)
+            .status();
+
+        match status {
+            Ok(s) if s.success() => {
+                if let Ok(meta) = std::fs::metadata(&archive_path) {
+                    if meta.len() >= 100_000 {
+                        downloaded = true;
+                        break;
+                    } else {
+                        last_err = format!("Downloaded file too small ({} bytes)", meta.len());
+                    }
+                } else {
+                    last_err = "Archive missing after download".into();
+                }
+            }
+            Ok(s) => {
+                last_err = format!("curl failed with exit status {s}");
+            }
+            Err(e) => {
+                last_err = format!("curl execute error: {e}");
+            }
+        }
+    }
+
+    if !downloaded {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err(format!("Download failed: {last_err}"));
+    }
+
+    // Inspect magic bytes for ZIP: starts with PK\x03\x04
+    let is_zip = std::fs::File::open(&archive_path)
+        .and_then(|mut f| {
+            use std::io::Read;
+            let mut magic = [0u8; 4];
+            f.read_exact(&mut magic)?;
+            Ok(&magic == b"PK\x03\x04")
+        })
+        .unwrap_or(!is_dmg);
+
+    let app_source = if is_zip {
+        let status = Command::new("ditto")
+            .args(["-x", "-k"])
+            .arg(&archive_path)
+            .arg(&unpack_dir)
+            .status()
+            .map_err(|e| format!("ditto extraction failed: {e}"))?;
+
+        if !status.success() {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err("Failed to extract update package".into());
+        }
+
+        find_app_bundle(&unpack_dir).ok_or_else(|| {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            "Sable.app not found in update package".to_string()
+        })?
+    } else {
         let mount_point = tmp_dir.join("mount");
         let _ = std::fs::create_dir_all(&mount_point);
         let status = Command::new("hdiutil")
@@ -1070,23 +1208,6 @@ fn perform_update_download_and_install(tag: &str, download_url: &str) -> Result<
             return Err("Sable.app not found inside DMG image".into());
         }
         extracted_app
-    } else {
-        let status = Command::new("ditto")
-            .args(["-x", "-k"])
-            .arg(&archive_path)
-            .arg(&unpack_dir)
-            .status()
-            .map_err(|e| format!("ditto extraction failed: {e}"))?;
-
-        if !status.success() {
-            let _ = std::fs::remove_dir_all(&tmp_dir);
-            return Err("Failed to extract update package".into());
-        }
-
-        find_app_bundle(&unpack_dir).ok_or_else(|| {
-            let _ = std::fs::remove_dir_all(&tmp_dir);
-            "Sable.app not found in update package".to_string()
-        })?
     };
 
     let dest_dir = PathBuf::from("/Applications/Sable.app");
@@ -1131,7 +1252,8 @@ fn find_app_bundle(dir: &Path) -> Option<PathBuf> {
                 return Some(path);
             }
             if path.is_dir() {
-                if let Some(nested) = find_app_bundle(&path) {
+                let nested = path.join("Sable.app");
+                if nested.is_dir() {
                     return Some(nested);
                 }
             }
@@ -1169,5 +1291,37 @@ fn apply_notice(mut state: Signal<AppState>, notice: Notice) {
     if rescan_space && on_space {
         state.write().space_volume = None;
         start_space(state, true);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_select_best_release_asset() {
+        let sample_json = r#"{
+            "tag_name": "v0.3.0",
+            "assets": [
+                {
+                    "url": "https://api.github.com/repos/h3ma209/Sable/releases/assets/723592428",
+                    "name": "Sable-0.3.0-macos-arm64.dmg",
+                    "browser_download_url": "https://github.com/h3ma209/Sable/releases/download/v0.3.0/Sable-0.3.0-macos-arm64.dmg"
+                },
+                {
+                    "url": "https://api.github.com/repos/h3ma209/Sable/releases/assets/723592562",
+                    "name": "Sable-0.3.0-macos-arm64.zip",
+                    "browser_download_url": "https://github.com/h3ma209/Sable/releases/download/v0.3.0/Sable-0.3.0-macos-arm64.zip"
+                }
+            ]
+        }"#;
+
+        let (primary, fallback, is_dmg) = select_best_release_asset(sample_json, "v0.3.0");
+        assert!(!is_dmg);
+        #[cfg(target_arch = "aarch64")]
+        {
+            assert!(primary.contains("723592562"), "Primary URL should be direct API asset URL: {primary}");
+            assert!(fallback.as_deref().unwrap_or("").contains("Sable-0.3.0-macos-arm64.zip"));
+        }
     }
 }

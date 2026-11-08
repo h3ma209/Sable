@@ -97,7 +97,12 @@ pub enum ConfirmKind {
     TrashSpace(Vec<PathBuf>),
     TrashThreat(PathBuf),
     Reindex,
-    InstallUpdate { tag: String, download_url: String },
+    InstallUpdate {
+        tag: String,
+        download_url: String,
+        fallback_url: Option<String>,
+        is_dmg: bool,
+    },
 }
 
 #[derive(Clone)]
