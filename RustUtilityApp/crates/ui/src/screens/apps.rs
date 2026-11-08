@@ -115,7 +115,7 @@ pub fn AppsScreen(mut state: Signal<AppState>) -> Element {
                                         button {
                                             class: "btn btn-ghost",
                                             onclick: move |_| reveal(&app.path),
-                                            "Show"
+                                            "Reveal in Finder"
                                         }
                                     }
                                 }
@@ -171,7 +171,7 @@ pub fn AppsScreen(mut state: Signal<AppState>) -> Element {
                                 button {
                                     class: "btn btn-ghost",
                                     onclick: move |_| reveal(&hit.path),
-                                    "Show"
+                                    "Reveal in Finder"
                                 }
                             }
                         }

@@ -88,6 +88,7 @@ pub struct Notice {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub enum ConfirmKind {
     TrashRoot(PathBuf),
     TrashRoots(Vec<PathBuf>),

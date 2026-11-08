@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 
 use crate::actions::start_clutter;
 use crate::components::{NoticeBanner, PageHeader, Safety};
-use crate::state::{AppState, Confirm, ConfirmKind, Screen};
+use crate::state::{AppState, Screen};
 use crate::util::{file_name, format_bytes, pretty, reveal};
 
 #[component]
@@ -36,8 +36,8 @@ pub fn ClutterScreen(mut state: Signal<AppState>) -> Element {
     rsx! {
         PageHeader {
             screen: Screen::Clutter,
-            subtitle: "Large files in Downloads (50 MB+). Move them to Trash when you are done.",
-            safety: Safety::Trash,
+            subtitle: "Large files in Downloads (50 MB+). Reveal in Finder to inspect and manage.",
+            safety: Safety::ReadOnly,
             action_label: Some(if busy { "Scanning…".into() } else { "Scan".into() }),
             action_enabled: !busy,
             on_action: Some(EventHandler::new(move |_| {
@@ -92,7 +92,7 @@ pub fn ClutterScreen(mut state: Signal<AppState>) -> Element {
                 for file in files {
                     {
                         let path = file.path.clone();
-                        let path2 = file.path.clone();
+                        // let path2 = file.path.clone();
                         let name = file_name(&file.path);
                         rsx! {
                             div { class: "row",
@@ -105,8 +105,10 @@ pub fn ClutterScreen(mut state: Signal<AppState>) -> Element {
                                     button {
                                         class: "btn btn-ghost",
                                         onclick: move |_| reveal(&path),
-                                        "Show"
+                                        "Reveal in Finder"
                                     }
+                                    // Move to Trash disabled — users delete manually in Finder
+                                    /*
                                     button {
                                         class: "btn btn-ghost",
                                         disabled: busy,
@@ -120,6 +122,7 @@ pub fn ClutterScreen(mut state: Signal<AppState>) -> Element {
                                         },
                                         "Trash"
                                     }
+                                    */
                                 }
                             }
                         }

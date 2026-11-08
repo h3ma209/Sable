@@ -67,7 +67,7 @@ pub fn CloudScreen(mut state: Signal<AppState>) -> Element {
                                         button {
                                             class: "btn btn-ghost",
                                             onclick: move |_| reveal(&path),
-                                            "Show"
+                                            "Reveal in Finder"
                                         }
                                     }
                                 }

@@ -54,7 +54,7 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
         PageHeader {
             screen: Screen::Space,
             subtitle: "One scan builds a map. Click folders or breadcrumbs to drill in without rescanning.",
-            safety: Safety::Trash,
+            safety: Safety::ReadOnly,
             action_label: Some(if busy { "Stop".into() } else { "Rescan".into() }),
             action_enabled: true,
             on_action: Some(EventHandler::new(move |_| {

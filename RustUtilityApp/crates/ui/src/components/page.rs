@@ -4,6 +4,7 @@ use crate::state::Screen;
 use crate::util::screen_kicker;
 
 #[derive(Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub enum Safety {
     ReadOnly,
     Trash,

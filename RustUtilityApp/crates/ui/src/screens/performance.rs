@@ -60,7 +60,7 @@ pub fn PerformanceScreen(mut state: Signal<AppState>) -> Element {
                                 button {
                                     class: "btn btn-ghost",
                                     onclick: move |_| reveal(&agent.path),
-                                    "Show"
+                                    "Reveal in Finder"
                                 }
                             }
                         }

@@ -64,7 +64,7 @@ pub fn CareScreen(mut state: Signal<AppState>) -> Element {
     };
     let malware_detail: &'static str = match threats {
         Some(0) => "You're clear",
-        Some(_) => "to remove",
+        Some(_) => "to review in Finder",
         None => "Threat scan has not run",
     };
     let apps_metric = match leftovers {
@@ -76,7 +76,7 @@ pub fn CareScreen(mut state: Signal<AppState>) -> Element {
         None => "Not scanned".to_string(),
     };
     let clutter_detail: &'static str = if downloads.is_some() {
-        "to remove"
+        "to review in Finder"
     } else {
         "Large files in Downloads"
     };
@@ -85,11 +85,11 @@ pub fn CareScreen(mut state: Signal<AppState>) -> Element {
         NoticeBanner { state }
         div { class: "page-kicker", "Good to go" }
         h1 { class: "page-title", "Jump back in" }
-        p { class: "page-sub", "Queue a mix of cleanup jobs. Hit play when you are ready — nothing leaves without a confirm." }
+        p { class: "page-sub", "Queue a mix of audit tasks to inspect caches, clutter, and launch agents." }
 
         div { class: "summary-bar glass",
             span { "Last hit: " strong { "{age}" } }
-            span { strong { "{size}" } " ready to reclaim" }
+            span { strong { "{size}" } " measured" }
             span { strong { "{selected}" } " in queue" }
         }
 
@@ -105,7 +105,7 @@ pub fn CareScreen(mut state: Signal<AppState>) -> Element {
                     screen: Screen::Cleanup,
                     title: "Cleanup",
                     metric: cleanup_metric,
-                    detail: "of junk to clean",
+                    detail: "of junk measured",
                     selectable: true,
                     success: false,
                 }

@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 
 use crate::actions::load;
 use crate::components::{NoticeBanner, PageHeader, Safety};
-use crate::state::{AppState, Confirm, ConfirmKind, Screen};
+use crate::state::{AppState, Screen};
 use crate::util::{describe_junk, format_bytes, pretty, reveal};
 
 #[component]
@@ -11,13 +11,13 @@ pub fn CleanupScreen(mut state: Signal<AppState>) -> Element {
     let home = state.read().home.clone();
     let junk = state.read().junk.clone();
     let total: u64 = junk.iter().map(|j| j.bytes).sum();
-    let junk_for_action = junk.clone();
+    // let junk_for_action = junk.clone();
 
     rsx! {
         PageHeader {
             screen: Screen::Cleanup,
-            subtitle: "Caches and logs. Anything you remove goes to the Trash.",
-            safety: Safety::Trash,
+            subtitle: "Caches and logs. Reveal folders in Finder to inspect and clean manually.",
+            safety: Safety::ReadOnly,
             action_label: Some("Refresh".into()),
             action_enabled: !busy,
             on_action: Some(EventHandler::new(move |_| {
@@ -42,6 +42,8 @@ pub fn CleanupScreen(mut state: Signal<AppState>) -> Element {
         } else {
             div { class: "summary-bar", style: "display: flex; justify-content: space-between; align-items: center;",
                 span { strong { "{format_bytes(total)}" } " reclaimable across {junk.len()} folders" }
+                // Deleting/trashing disabled for safety — users manage in Finder
+                /*
                 button {
                     class: "btn btn-danger",
                     disabled: busy || junk_for_action.is_empty(),
@@ -60,6 +62,7 @@ pub fn CleanupScreen(mut state: Signal<AppState>) -> Element {
                     },
                     "Clean All"
                 }
+                */
             }
             div { class: "card",
                 for item in junk {
@@ -84,8 +87,10 @@ pub fn CleanupScreen(mut state: Signal<AppState>) -> Element {
                                     button {
                                         class: "btn btn-ghost",
                                         onclick: move |_| reveal(&path_show),
-                                        "Show"
+                                        "Reveal in Finder"
                                     }
+                                    // Move to Trash disabled — users delete manually in Finder
+                                    /*
                                     button {
                                         class: "btn btn-ghost",
                                         disabled: busy || !exists,
@@ -103,6 +108,7 @@ pub fn CleanupScreen(mut state: Signal<AppState>) -> Element {
                                         },
                                         "Trash"
                                     }
+                                    */
                                 }
                             }
                         }

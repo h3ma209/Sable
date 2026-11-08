@@ -91,7 +91,7 @@ pub fn ProtectionScreen(mut state: Signal<AppState>) -> Element {
                             button {
                                 class: "btn btn-ghost",
                                 onclick: move |_| reveal(&hit.path),
-                                "Show"
+                                "Reveal in Finder"
                             }
                         }
                     }
