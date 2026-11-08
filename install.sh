@@ -29,7 +29,7 @@ echo "==> Fetching latest release info for ${ARCH_LABEL}..."
 LATEST_TAG=$(curl -sSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 
 if [[ -z "${LATEST_TAG:-}" ]]; then
-  LATEST_TAG="v0.3.1"
+  LATEST_TAG="v0.3.2"
 fi
 
 ZIP_NAME="Sable-${LATEST_TAG#v}-macos-${ARCH_LABEL}.zip"

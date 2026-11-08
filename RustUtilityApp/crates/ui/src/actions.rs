@@ -835,6 +835,36 @@ pub fn perform_confirm(state: Signal<AppState>, kind: ConfirmKind) {
     }
 }
 
+pub fn check_for_updates_on_startup(mut state: Signal<AppState>) {
+    spawn(async move {
+        let current_version = env!("CARGO_PKG_VERSION");
+        let result = tokio::task::spawn_blocking(fetch_latest_release_info)
+            .await
+            .unwrap_or_else(|e| Err(format!("Task error: {e}")));
+
+        if let Ok(info) = result {
+            let latest_clean = info.tag.trim().trim_start_matches('v');
+            if is_version_newer(latest_clean, current_version) {
+                let mut s = state.write();
+                s.confirm = Some(crate::state::Confirm {
+                    heading: format!("Update Available: {}", info.tag),
+                    body: format!(
+                        "A newer version of Sable ({}) is available!\nYou are running v{}.\n\nIt will be installed directly to /Applications and the app will restart automatically.",
+                        info.tag, current_version
+                    ),
+                    action: "Update & Restart",
+                    kind: ConfirmKind::InstallUpdate {
+                        tag: info.tag,
+                        download_url: info.download_url,
+                        fallback_url: info.fallback_url,
+                        is_dmg: info.is_dmg,
+                    },
+                });
+            }
+        }
+    });
+}
+
 pub fn check_for_updates(mut state: Signal<AppState>) {
     if state.read().busy {
         return;
@@ -1297,6 +1327,15 @@ fn apply_notice(mut state: Signal<AppState>, notice: Notice) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_version_comparison() {
+        assert!(is_version_newer("0.3.2", "0.3.1"));
+        assert!(is_version_newer("1.0.0", "0.3.1"));
+        assert!(!is_version_newer("0.3.1", "0.3.1"));
+        assert!(!is_version_newer("0.3.0", "0.3.1"));
+        assert!(!is_version_newer("0.2.9", "0.3.1"));
+    }
 
     #[test]
     fn test_select_best_release_asset() {

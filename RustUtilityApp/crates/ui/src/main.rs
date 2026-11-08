@@ -34,8 +34,13 @@ fn main() {
 #[component]
 fn App() -> Element {
     let mut state = use_signal(AppState::new);
+    let mut checked_updates = use_signal(|| false);
 
     use_effect(move || {
+        if !*checked_updates.read() {
+            checked_updates.set(true);
+            actions::check_for_updates_on_startup(state);
+        }
         ensure_auto_load(state);
     });
 

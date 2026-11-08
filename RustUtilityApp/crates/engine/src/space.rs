@@ -4,15 +4,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use rayon::prelude::*;
+
 use crate::access::{folder_access, AccessStatus};
 use crate::cleanup::finder_trash;
 use crate::control::ExecutionControl;
 
 /// `SF_DATALESS`. The scan tests this bit of `st_flags` after `lstat`.
 const SF_DATALESS: u32 = 0x40000000;
-
-/// Concurrent directory subtrees.
-const MAX_CONCURRENT_SCANS: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CloudStatus {
@@ -133,26 +132,28 @@ impl ProgressTracker {
         let done = self.bytes_done.fetch_add(bytes, Ordering::Relaxed) + bytes;
         let items = self.items_done.fetch_add(1, Ordering::Relaxed) + 1;
 
-        if let Some(ref tx) = self.tx {
-            let mut should_emit = false;
-            if let Ok(mut last) = self.last_emit.try_lock() {
-                if last.elapsed() >= std::time::Duration::from_millis(50) {
-                    *last = std::time::Instant::now();
-                    should_emit = true;
+        if (items & 0x7F) == 0 {
+            if let Some(ref tx) = self.tx {
+                let mut should_emit = false;
+                if let Ok(mut last) = self.last_emit.try_lock() {
+                    if last.elapsed() >= std::time::Duration::from_millis(50) {
+                        *last = std::time::Instant::now();
+                        should_emit = true;
+                    }
                 }
-            }
-            if should_emit {
-                let mut total = self.bytes_total.load(Ordering::Relaxed);
-                if done >= total {
-                    total = done.saturating_mul(105) / 100;
-                    self.bytes_total.store(total, Ordering::Relaxed);
+                if should_emit {
+                    let mut total = self.bytes_total.load(Ordering::Relaxed);
+                    if done >= total {
+                        total = done.saturating_mul(105) / 100;
+                        self.bytes_total.store(total, Ordering::Relaxed);
+                    }
+                    let _ = tx.send(SpaceProgress {
+                        bytes_done: done,
+                        bytes_total: total,
+                        items_done: items,
+                        current_path: path.display().to_string(),
+                    });
                 }
-                let _ = tx.send(SpaceProgress {
-                    bytes_done: done,
-                    bytes_total: total,
-                    items_done: items,
-                    current_path: path.display().to_string(),
-                });
             }
         }
     }
@@ -340,7 +341,7 @@ fn build_root_entity(
     }
     tracker.record_item(0, &scan_root);
     let entries = directory_entries(task, &scan_root);
-    let mut children = build_children(entries, root_dev, task, &seen, tracker, true);
+    let mut children = build_children(entries, root_dev, task, &seen, tracker, 0);
     children.sort_by(|a, b| b.bytes.cmp(&a.bytes));
     children.retain(|node| node.bytes > 0 || node.is_directory);
     let bytes = children.iter().fold(0u64, |sum, child| sum.saturating_add(child.bytes));
@@ -373,84 +374,41 @@ fn directory_entries(task: &ScanTask, directory: &Path) -> Vec<PathBuf> {
     }
 }
 
-/// Parallel only for the scan root's immediate children. Deeper folders stay on that same thread.
+/// Work-stealing parallel traversal via rayon for upper directory depths.
 fn build_children(
     entries: Vec<PathBuf>,
     root_dev: u64,
     task: &Arc<ScanTask>,
     seen: &Arc<Mutex<HashSet<(u64, u64)>>>,
     tracker: &Arc<ProgressTracker>,
-    parallel: bool,
+    depth: usize,
 ) -> Vec<SpaceEntity> {
     if entries.is_empty() || tracker.is_canceled() {
         return Vec::new();
     }
-    let total_top_entries = entries.len();
-    let completed_top_count = Arc::new(AtomicU64::new(0));
 
-    let workers = if parallel {
-        MAX_CONCURRENT_SCANS.min(entries.len())
+    if depth < 3 && entries.len() > 1 {
+        entries
+            .into_par_iter()
+            .filter_map(|path| {
+                if tracker.is_canceled() {
+                    return None;
+                }
+                build_entity(path, root_dev, task, seen, tracker, depth + 1)
+            })
+            .collect()
     } else {
-        1
-    };
-    if workers <= 1 {
-        return entries
+        entries
             .into_iter()
             .take_while(|_| !tracker.is_canceled())
             .filter_map(|path| {
                 if tracker.is_canceled() {
                     return None;
                 }
-                let ent = build_entity(path, root_dev, task, seen, tracker);
-                if parallel && total_top_entries > 0 {
-                    let done_top = completed_top_count.fetch_add(1, Ordering::Relaxed) + 1;
-                    let current_done = tracker.bytes_done.load(Ordering::Relaxed);
-                    let est = (current_done as f64 / (done_top as f64 / total_top_entries as f64)) as u64;
-                    tracker.bytes_total.store(est.max(current_done + 1), Ordering::Relaxed);
-                }
-                ent
+                build_entity(path, root_dev, task, seen, tracker, depth + 1)
             })
-            .collect();
-    }
-    let chunk_size = entries.len().div_ceil(workers);
-    let chunks: Vec<Vec<PathBuf>> = entries
-        .chunks(chunk_size)
-        .map(|chunk| chunk.to_vec())
-        .collect();
-    std::thread::scope(|scope| {
-        let handles: Vec<_> = chunks
-            .into_iter()
-            .map(|chunk| {
-                let task = Arc::clone(task);
-                let seen = Arc::clone(seen);
-                let tracker = Arc::clone(tracker);
-                let completed_top = Arc::clone(&completed_top_count);
-                scope.spawn(move || {
-                    let mut list = Vec::new();
-                    for path in chunk {
-                        if tracker.is_canceled() {
-                            break;
-                        }
-                        if let Some(ent) = build_entity(path, root_dev, &task, &seen, &tracker) {
-                            list.push(ent);
-                        }
-                        if parallel && total_top_entries > 0 {
-                            let done_top = completed_top.fetch_add(1, Ordering::Relaxed) + 1;
-                            let current_done = tracker.bytes_done.load(Ordering::Relaxed);
-                            let est = (current_done as f64 / (done_top as f64 / total_top_entries as f64)) as u64;
-                            tracker.bytes_total.store(est.max(current_done + 1), Ordering::Relaxed);
-                        }
-                    }
-                    list
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .filter_map(|handle| handle.join().ok())
-            .flatten()
             .collect()
-    })
+    }
 }
 
 fn build_entity(
@@ -459,6 +417,7 @@ fn build_entity(
     task: &Arc<ScanTask>,
     seen: &Arc<Mutex<HashSet<(u64, u64)>>>,
     tracker: &Arc<ProgressTracker>,
+    depth: usize,
 ) -> Option<SpaceEntity> {
     if tracker.is_canceled() {
         return None;
@@ -468,6 +427,7 @@ fn build_entity(
     let is_link = meta.file_type().is_symlink();
     // Do not follow symlinks as directories: avoids loops and duplicated stats!
     let is_directory = same_volume && meta.is_dir() && !is_link;
+    let nlink = meta.st_nlink();
     let cloud = cloud_status(
         task.strategy,
         path_is_ubiquitous(&path),
@@ -513,7 +473,7 @@ fn build_entity(
             }
         }
         let entries = directory_entries(task, &path);
-        let mut children = build_children(entries, root_dev, task, seen, tracker, false);
+        let mut children = build_children(entries, root_dev, task, seen, tracker, depth);
         children.sort_by(|a, b| b.bytes.cmp(&a.bytes));
         let bytes = children.iter().fold(0u64, |sum, child| sum.saturating_add(child.bytes));
         let leaves = children.iter().fold(0u64, |sum, child| sum.saturating_add(child.leaves));
@@ -529,18 +489,22 @@ fn build_entity(
         });
     }
 
-    let id = (meta.st_dev(), meta.st_ino());
-    if !seen.lock().ok()?.insert(id) {
-        return Some(SpaceEntity {
-            path,
-            bytes: 0,
-            is_directory: false,
-            is_purgeable: false,
-            cloud,
-            leaves: 0,
-            modified,
-            children: Vec::new(),
-        });
+    // Only lock `seen` if file has hard links (nlink > 1) to avoid duplicate counting.
+    // Files with nlink <= 1 cannot appear under multiple paths, skipping lock contention.
+    if nlink > 1 {
+        let id = (meta.st_dev(), meta.st_ino());
+        if !seen.lock().ok()?.insert(id) {
+            return Some(SpaceEntity {
+                path,
+                bytes: 0,
+                is_directory: false,
+                is_purgeable: false,
+                cloud,
+                leaves: 0,
+                modified,
+                children: Vec::new(),
+            });
+        }
     }
     let (leaves, _) = leaf_count(false, cloud);
     let bytes = allocated_bytes(&meta);
@@ -575,42 +539,50 @@ fn push_alias(aliases: &mut Vec<PathBuf>, path: PathBuf) {
     }
 }
 
-fn path_aliases(path: &Path) -> Vec<PathBuf> {
-    let mut aliases = vec![path.to_path_buf()];
-    append_home_data_aliases(&mut aliases);
-    aliases
-}
-
-fn storage_aliases(path: &Path) -> Vec<PathBuf> {
-    let mut aliases = vec![path.to_path_buf()];
-    append_home_data_aliases(&mut aliases);
-    aliases
-}
-
-fn append_home_data_aliases(aliases: &mut Vec<PathBuf>) {
+fn home_data_context() -> (PathBuf, PathBuf) {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     if home.as_os_str().is_empty() {
-        return;
+        return (PathBuf::new(), PathBuf::new());
     }
     let data = computer_root();
-    let user = home.file_name().map(|name| PathBuf::from(name)).unwrap_or_default();
+    let user = home.file_name().map(PathBuf::from).unwrap_or_default();
     let data_home = data.join("Users").join(&user);
-    let bases = aliases.clone();
-    for base in bases {
-        if let Ok(rest) = base.strip_prefix(&home) {
-            push_alias(aliases, data_home.join(rest));
-        }
-        if let Ok(rest) = base.strip_prefix(&data_home) {
-            push_alias(aliases, home.join(rest));
+    (home, data_home)
+}
+
+fn path_aliases(path: &Path) -> Vec<PathBuf> {
+    let (home, data_home) = home_data_context();
+    let mut aliases = vec![path.to_path_buf()];
+    if !home.as_os_str().is_empty() {
+        if let Ok(rest) = path.strip_prefix(&home) {
+            push_alias(&mut aliases, data_home.join(rest));
+        } else if let Ok(rest) = path.strip_prefix(&data_home) {
+            push_alias(&mut aliases, home.join(rest));
         }
     }
+    aliases
 }
 
 fn build_lookup(root: &SpaceEntity) -> HashMap<PathBuf, Vec<usize>> {
     let mut lookup = HashMap::new();
-    fn walk(node: &SpaceEntity, index: &[usize], lookup: &mut HashMap<PathBuf, Vec<usize>>) {
+    let (home, data_home) = home_data_context();
+    fn walk(
+        node: &SpaceEntity,
+        index: &[usize],
+        lookup: &mut HashMap<PathBuf, Vec<usize>>,
+        home: &Path,
+        data_home: &Path,
+    ) {
         if node.is_directory {
-            for alias in storage_aliases(&node.path) {
+            let mut aliases = vec![node.path.clone()];
+            if !home.as_os_str().is_empty() {
+                if let Ok(rest) = node.path.strip_prefix(home) {
+                    push_alias(&mut aliases, data_home.join(rest));
+                } else if let Ok(rest) = node.path.strip_prefix(data_home) {
+                    push_alias(&mut aliases, home.join(rest));
+                }
+            }
+            for alias in aliases {
                 lookup.entry(alias).or_insert_with(|| index.to_vec());
             }
         }
@@ -618,10 +590,10 @@ fn build_lookup(root: &SpaceEntity) -> HashMap<PathBuf, Vec<usize>> {
             let mut child_index = Vec::with_capacity(index.len() + 1);
             child_index.extend_from_slice(index);
             child_index.push(offset);
-            walk(child, &child_index, lookup);
+            walk(child, &child_index, lookup, home, data_home);
         }
     }
-    walk(root, &[], &mut lookup);
+    walk(root, &[], &mut lookup, &home, &data_home);
     lookup
 }
 
@@ -705,8 +677,15 @@ fn ignored_nofollow(path: &Path) -> bool {
     if text == "/Volumes" || text.starts_with("/Volumes/") {
         return true;
     }
-    // Never traverse into /System/Volumes (contains firmlink duplicate Data volume and recursive Volumes loop)
-    if text == "/System/Volumes" || text.starts_with("/System/Volumes/") {
+    // Never traverse into /System/Volumes/Data/Volumes (contains mount points)
+    if text == "/System/Volumes/Data/Volumes" || text.starts_with("/System/Volumes/Data/Volumes/") {
+        return true;
+    }
+    // Never traverse into other /System/Volumes mount points (Preboot, VM, Update, etc.)
+    // Note: /System/Volumes/Data itself is the primary data root on macOS
+    if text == "/System/Volumes"
+        || (text.starts_with("/System/Volumes/") && !text.starts_with("/System/Volumes/Data"))
+    {
         return true;
     }
     // Pseudo filesystems and automounters
@@ -831,7 +810,7 @@ mod tests {
         let task = Arc::new(create_scan_task(Path::new("/tmp")));
         let seen = Arc::new(Mutex::new(HashSet::new()));
         let tracker = Arc::new(ProgressTracker::new(None, None, 4096));
-        let sub = build_entity(dir.join("sub"), root_dev, &task, &seen, &tracker).unwrap();
+        let sub = build_entity(dir.join("sub"), root_dev, &task, &seen, &tracker, 0).unwrap();
         let root = SpaceEntity {
             path: dir.clone(),
             bytes: sub.bytes,
@@ -867,6 +846,8 @@ mod tests {
         assert!(ignored_nofollow(Path::new("/Volumes")));
         assert!(ignored_nofollow(Path::new("/System/Volumes")));
         assert!(ignored_nofollow(Path::new("/System/Volumes/Data/Volumes/Macintosh HD")));
+        assert!(!ignored_nofollow(Path::new("/System/Volumes/Data/Applications")));
+        assert!(!ignored_nofollow(Path::new("/System/Volumes/Data/Users")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -885,7 +866,7 @@ mod tests {
         let task = Arc::new(create_scan_task(Path::new("/tmp")));
         let seen = Arc::new(Mutex::new(HashSet::new()));
         let tracker = Arc::new(ProgressTracker::new(None, None, 4096));
-        let entity = build_entity(dir.join("link_to_sub"), root_dev, &task, &seen, &tracker);
+        let entity = build_entity(dir.join("link_to_sub"), root_dev, &task, &seen, &tracker, 0);
         if let Some(e) = entity {
             assert!(!e.is_directory, "Symlink to directory must not be marked as is_directory");
         }
