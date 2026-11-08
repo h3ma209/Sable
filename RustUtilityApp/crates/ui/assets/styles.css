@@ -1359,3 +1359,361 @@ button:disabled {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── App Icons in Installed & Leftovers ── */
+
+.app-row-icon {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  flex-shrink: 0;
+  border-radius: 9px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.32);
+}
+
+.selected-app-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.selected-app-icon {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  flex-shrink: 0;
+  border-radius: 11px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.36);
+}
+
+.selected-app-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.selected-app-sub {
+  font-size: 12px;
+  color: var(--ink-mute);
+  margin-top: 3px;
+  font-family: var(--font-mono);
+}
+
+/* ── Sidebar Update Button ── */
+
+.rail-footer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: auto;
+  padding: 6px 0;
+}
+
+.rail-update-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 180ms var(--ease);
+  position: relative;
+  overflow: hidden;
+}
+
+.rail-update-btn:hover:not(:disabled) {
+  background: rgba(30, 215, 96, 0.08);
+  border-color: rgba(30, 215, 96, 0.3);
+  color: var(--ink);
+  box-shadow: 0 2px 8px rgba(30, 215, 96, 0.12);
+}
+
+.rail-update-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.rail-update-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.update-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+  transition: transform 300ms var(--ease), opacity 180ms var(--ease);
+}
+
+.rail-update-btn:hover .update-icon {
+  transform: translateY(1px);
+  opacity: 1;
+}
+
+.update-btn-text {
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.update-ver-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink-mute);
+  font-family: var(--font-mono);
+}
+
+/* ── Space Lens Scanning Progress Card ── */
+
+.space-progress-card {
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: fade-up 260ms var(--ease-out) both;
+}
+
+.space-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.space-progress-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.space-progress-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.space-progress-pct {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+
+.space-progress-track {
+  height: 10px;
+  width: 100%;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  position: relative;
+}
+
+.space-progress-bar {
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #10b981, #1ed760);
+  box-shadow: 0 0 14px rgba(30, 215, 96, 0.45);
+  transition: width 140ms ease-out;
+}
+
+.space-progress-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.space-progress-stats .stat-box {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.space-progress-stats .stat-label {
+  font-size: 11px;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
+.space-progress-stats .stat-val {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  font-family: var(--font-mono);
+}
+
+.space-progress-stats .stat-val.done {
+  color: #10b981;
+}
+
+.space-progress-stats .stat-val.left {
+  color: var(--ink-mute);
+}
+
+.space-progress-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-mute);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.space-progress-path .path-prefix {
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.space-progress-path .path-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+/* ── Space Lens Folder Selector & Below Navigation ── */
+
+.space-folder-selector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+
+.space-selector-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-mute);
+  flex-shrink: 0;
+}
+
+.space-folder-pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.space-folder-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 180ms var(--ease);
+}
+
+.space-folder-pill:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.space-folder-pill.active {
+  background: rgba(30, 215, 96, 0.14);
+  border-color: rgba(30, 215, 96, 0.45);
+  color: #fff;
+  box-shadow: 0 0 10px rgba(30, 215, 96, 0.22);
+}
+
+.folder-pill-icon {
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+.space-folder-pill.active .folder-pill-icon {
+  opacity: 1;
+  filter: drop-shadow(0 0 4px rgba(30, 215, 96, 0.6));
+}
+
+.folder-pill-name {
+  font-weight: 600;
+}
+
+.folder-pill-path {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--ink-mute);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.space-folder-pill.active .folder-pill-path {
+  color: #10b981;
+  background: rgba(30, 215, 96, 0.15);
+}
+
+.space-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.space-history-btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.space-nav-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+.space-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.breadcrumb-sep {
+  opacity: 0.4;
+  font-size: 12px;
+  user-select: none;
+}
+
+
+
+

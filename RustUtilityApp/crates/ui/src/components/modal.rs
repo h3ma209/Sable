@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::actions::perform_confirm;
-use crate::state::AppState;
+use crate::state::{AppState, ConfirmKind};
 
 #[component]
 pub fn ConfirmModal(mut state: Signal<AppState>) -> Element {
@@ -12,6 +12,7 @@ pub fn ConfirmModal(mut state: Signal<AppState>) -> Element {
     let body = confirm.body.clone();
     let action = confirm.action;
     let kind = confirm.kind.clone();
+    let is_update = matches!(kind, ConfirmKind::InstallUpdate { .. });
 
     rsx! {
         div {
@@ -21,10 +22,10 @@ pub fn ConfirmModal(mut state: Signal<AppState>) -> Element {
                 class: "modal",
                 onclick: move |e| e.stop_propagation(),
                 h2 { "{heading}" }
-                p { "{body}" }
+                p { style: "white-space: pre-line;", "{body}" }
                 div { class: "modal-actions",
                     button {
-                        class: "btn btn-danger",
+                        class: if is_update { "btn btn-primary" } else { "btn btn-danger" },
                         onclick: move |_| {
                             state.write().confirm = None;
                             perform_confirm(state, kind.clone());

@@ -1,14 +1,15 @@
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 
 use dioxus::prelude::*;
 use engine::{
     flush_dns_cache, folder_access, junk_roots, large_downloads, launch_agents, local_cloud_folders,
     machine_sample, move_download_to_trash, move_root_to_trash, prepare_and_scan, reindex_spotlight,
-    remember_ignore, run_care, run_scan, scan_space_volume, space_report_at, spotlight_status,
+    remember_ignore, run_care, run_scan, scan_space_volume_with_progress, space_report_at, spotlight_status,
     survey_leftovers, trash_selected, trash_threat as engine_trash_threat, volume_contains,
     computer_root, AccessStatus,
-    ExecutionControl, ExtensionWatchDetector, MachineSample, ScanConfig, ScanEvent, SpaceReport,
+    ExecutionControl, ExtensionWatchDetector, MachineSample, ScanConfig, ScanEvent, SpaceProgress, SpaceReport,
 };
 use tokio::sync::mpsc;
 
@@ -580,14 +581,21 @@ pub fn start_space(mut state: Signal<AppState>, force_rescan: bool) {
         .as_ref()
         .map(|volume| volume.scan_root.clone())
         .unwrap_or_else(|| view_folder.clone());
+    let control = Arc::new(ExecutionControl::new());
+    let control_for_scan = Arc::clone(&control);
     let scan_id = {
         let mut s = state.write();
+        s.control = Some(control);
         if force_rescan {
             s.space_volume = None;
         }
         s.space = None;
         s.space_selected.clear();
         s.space_selected_bytes.clear();
+        s.space_progress_bytes = 0;
+        s.space_progress_total_bytes = 0;
+        s.space_progress_items = 0;
+        s.space_progress_current = String::new();
         s.space_scan_id = s.space_scan_id.wrapping_add(1);
         s.busy = true;
         s.status = "scanning";
@@ -598,8 +606,26 @@ pub fn start_space(mut state: Signal<AppState>, force_rescan: bool) {
     } else {
         view_folder.clone()
     };
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SpaceProgress>();
+    {
+        let mut state_listener = state;
+        spawn(async move {
+            while let Some(prog) = rx.recv().await {
+                let mut s = state_listener.write();
+                if s.space_scan_id != scan_id {
+                    break;
+                }
+                s.space_progress_bytes = prog.bytes_done;
+                s.space_progress_total_bytes = prog.bytes_total;
+                s.space_progress_items = prog.items_done;
+                s.space_progress_current = prog.current_path;
+            }
+        });
+    }
+
     spawn(async move {
-        let volume = scan_space_volume(scan_root).await;
+        let volume = scan_space_volume_with_progress(scan_root, Some(control_for_scan), Some(tx)).await;
         let report = space_report_at(&volume, &view_folder).unwrap_or(SpaceReport {
             root: view_folder,
             total: 0,
@@ -617,6 +643,16 @@ pub fn start_space(mut state: Signal<AppState>, force_rescan: bool) {
             s.space_selected_bytes.clear();
         }
         finish_and_pump(state);
+    });
+}
+
+pub fn stop_space(mut state: Signal<AppState>) {
+    let mut s = state.write();
+    s.cancel_work();
+    s.notice = Some(Notice {
+        ok: true,
+        text: "Space scan stopped.".into(),
+        refresh: None,
     });
 }
 
@@ -788,7 +824,333 @@ pub fn perform_confirm(state: Signal<AppState>, kind: ConfirmKind) {
         ConfirmKind::TrashSpace(paths) => trash_space(state, paths),
         ConfirmKind::TrashThreat(path) => trash_threat(state, path),
         ConfirmKind::Reindex => run_tool(state, Tool::Reindex),
+        ConfirmKind::InstallUpdate { tag, download_url } => {
+            install_update(state, tag, download_url);
+        }
     }
+}
+
+pub fn check_for_updates(mut state: Signal<AppState>) {
+    if state.read().busy {
+        return;
+    }
+    state.write().busy = true;
+    state.write().status = "Checking for updates…";
+
+    spawn(async move {
+        let current_version = env!("CARGO_PKG_VERSION");
+        let result = tokio::task::spawn_blocking(|| {
+            fetch_latest_release_info()
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("Task error: {e}")));
+
+        let mut s = state.write();
+        s.busy = false;
+        s.status = "Idle";
+
+        match result {
+            Ok(info) => {
+                let latest_clean = info.tag.trim().trim_start_matches('v');
+                let is_newer = is_version_newer(latest_clean, current_version);
+                if is_newer {
+                    s.confirm = Some(crate::state::Confirm {
+                        heading: format!("Update Available: {}", info.tag),
+                        body: format!(
+                            "A newer version of Sable ({}) is available!\nYou are running v{}.\n\nIt will be installed directly to /Applications and the app will restart automatically.",
+                            info.tag, current_version
+                        ),
+                        action: "Update & Restart",
+                        kind: ConfirmKind::InstallUpdate {
+                            tag: info.tag,
+                            download_url: info.download_url,
+                        },
+                    });
+                } else {
+                    s.confirm = Some(crate::state::Confirm {
+                        heading: "Sable is Up to Date".into(),
+                        body: format!(
+                            "You are currently running the latest version of Sable (v{}).\n\nWould you like to reinstall directly to /Applications and restart automatically?",
+                            current_version
+                        ),
+                        action: "Reinstall & Restart",
+                        kind: ConfirmKind::InstallUpdate {
+                            tag: info.tag,
+                            download_url: info.download_url,
+                        },
+                    });
+                    s.notice = Some(Notice {
+                        ok: true,
+                        text: format!("Sable is up to date (v{}).", current_version),
+                        refresh: None,
+                    });
+                }
+            }
+            Err(err) => {
+                s.notice = Some(Notice {
+                    ok: false,
+                    text: format!("Update check failed: {err}"),
+                    refresh: None,
+                });
+            }
+        }
+    });
+}
+
+pub fn install_update(mut state: Signal<AppState>, tag: String, download_url: String) {
+    if state.read().busy {
+        return;
+    }
+    state.write().busy = true;
+    state.write().status = "Downloading & installing update…";
+
+    spawn(async move {
+        let result = tokio::task::spawn_blocking(move || {
+            perform_update_download_and_install(&tag, &download_url)
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("Task error: {e}")));
+
+        let mut s = state.write();
+        s.busy = false;
+        s.status = "Idle";
+
+        match result {
+            Ok(msg) => {
+                s.notice = Some(Notice {
+                    ok: true,
+                    text: msg,
+                    refresh: None,
+                });
+                let _ = Command::new("sh")
+                    .args(["-c", "sleep 0.5 && open -n -a /Applications/Sable.app"])
+                    .spawn();
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                std::process::exit(0);
+            }
+            Err(err) => {
+                s.notice = Some(Notice {
+                    ok: false,
+                    text: format!("Update failed: {err}"),
+                    refresh: None,
+                });
+            }
+        }
+    });
+}
+
+struct ReleaseInfo {
+    tag: String,
+    download_url: String,
+}
+
+fn fetch_latest_release_info() -> Result<ReleaseInfo, String> {
+    let output = Command::new("curl")
+        .args([
+            "-sSL",
+            "-H", "User-Agent: Sable-App",
+            "-H", "Accept: application/vnd.github.v3+json",
+            "https://api.github.com/repos/h3ma209/Sable/releases/latest",
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run curl: {e}"))?;
+
+    if !output.status.success() {
+        return Err("Could not reach update server".into());
+    }
+
+    let json = String::from_utf8(output.stdout)
+        .map_err(|e| format!("Invalid server response: {e}"))?;
+
+    let tag = extract_json_field(&json, "tag_name")
+        .ok_or_else(|| "Could not parse release tag from server".to_string())?;
+
+    let download_url = extract_download_url(&json).unwrap_or_else(|| {
+        let clean = tag.trim_start_matches('v');
+        let arch_label = if std::env::consts::ARCH == "x86_64" { "x64" } else { "arm64" };
+        format!("https://github.com/h3ma209/Sable/releases/download/{tag}/Sable-{clean}-macos-{arch_label}.zip")
+    });
+
+    Ok(ReleaseInfo { tag, download_url })
+}
+
+fn extract_json_field(json: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{key}\":");
+    let idx = json.find(&pattern)?;
+    let rest = &json[idx + pattern.len()..];
+    let quote_start = rest.find('"')?;
+    let quote_end = rest[quote_start + 1..].find('"')?;
+    Some(rest[quote_start + 1..quote_start + 1 + quote_end].to_string())
+}
+
+fn extract_download_url(json: &str) -> Option<String> {
+    let arch_keyword = if std::env::consts::ARCH == "x86_64" { "x64" } else { "arm64" };
+    let mut best_url: Option<String> = None;
+
+    let marker = "\"browser_download_url\":";
+    let mut slice = json;
+    while let Some(idx) = slice.find(marker) {
+        slice = &slice[idx + marker.len()..];
+        if let Some(quote_start) = slice.find('"') {
+            if let Some(quote_end) = slice[quote_start + 1..].find('"') {
+                let url = &slice[quote_start + 1..quote_start + 1 + quote_end];
+                if url.ends_with(".zip") {
+                    if url.contains(arch_keyword) {
+                        return Some(url.to_string());
+                    }
+                    if best_url.is_none() {
+                        best_url = Some(url.to_string());
+                    }
+                } else if url.ends_with(".dmg") && best_url.is_none() {
+                    best_url = Some(url.to_string());
+                }
+            }
+        }
+    }
+    best_url
+}
+
+fn perform_update_download_and_install(tag: &str, download_url: &str) -> Result<String, String> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_dir = std::env::temp_dir().join(format!("sable_update_{}_{}", std::process::id(), now));
+    let _ = std::fs::create_dir_all(&tmp_dir);
+    let is_dmg = download_url.ends_with(".dmg");
+    let archive_path = tmp_dir.join(if is_dmg { "update.dmg" } else { "update.zip" });
+    let unpack_dir = tmp_dir.join("unpacked");
+    let _ = std::fs::create_dir_all(&unpack_dir);
+
+    let status = Command::new("curl")
+        .args(["-sSL", "-o"])
+        .arg(&archive_path)
+        .arg(download_url)
+        .status()
+        .map_err(|e| format!("curl download failed: {e}"))?;
+
+    if !status.success() {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err("Failed to download release archive".into());
+    }
+
+    let app_source = if is_dmg {
+        let mount_point = tmp_dir.join("mount");
+        let _ = std::fs::create_dir_all(&mount_point);
+        let status = Command::new("hdiutil")
+            .args(["attach", "-nobrowse", "-readonly", "-mountpoint"])
+            .arg(&mount_point)
+            .arg(&archive_path)
+            .status()
+            .map_err(|e| format!("hdiutil attach failed: {e}"))?;
+
+        if !status.success() {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err("Failed to mount update DMG".into());
+        }
+
+        let app_in_dmg = find_app_bundle(&mount_point);
+        let extracted_app = unpack_dir.join("Sable.app");
+
+        if let Some(ref source) = app_in_dmg {
+            let _ = Command::new("cp")
+                .args(["-R"])
+                .arg(source)
+                .arg(&extracted_app)
+                .status();
+        }
+
+        let _ = Command::new("hdiutil")
+            .args(["detach", "-force"])
+            .arg(&mount_point)
+            .status();
+
+        if !extracted_app.exists() {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err("Sable.app not found inside DMG image".into());
+        }
+        extracted_app
+    } else {
+        let status = Command::new("ditto")
+            .args(["-x", "-k"])
+            .arg(&archive_path)
+            .arg(&unpack_dir)
+            .status()
+            .map_err(|e| format!("ditto extraction failed: {e}"))?;
+
+        if !status.success() {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err("Failed to extract update package".into());
+        }
+
+        find_app_bundle(&unpack_dir).ok_or_else(|| {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            "Sable.app not found in update package".to_string()
+        })?
+    };
+
+    let dest_dir = PathBuf::from("/Applications/Sable.app");
+    if dest_dir.exists() {
+        let _ = std::fs::remove_dir_all(&dest_dir);
+    }
+
+    let status = Command::new("cp")
+        .args(["-R"])
+        .arg(&app_source)
+        .arg(&dest_dir)
+        .status()
+        .map_err(|e| format!("Failed to copy app to /Applications: {e}"))?;
+
+    if !status.success() {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err("Failed to install to /Applications (check permissions)".into());
+    }
+
+    let _ = Command::new("xattr")
+        .args(["-cr"])
+        .arg(&dest_dir)
+        .status();
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+
+    Ok(format!("Sable {tag} successfully installed to /Applications/Sable.app! Restarting…"))
+}
+
+fn find_app_bundle(dir: &Path) -> Option<PathBuf> {
+    if dir.extension().and_then(|e| e.to_str()) == Some("app") {
+        return Some(dir.to_path_buf());
+    }
+    let direct = dir.join("Sable.app");
+    if direct.is_dir() {
+        return Some(direct);
+    }
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("app") {
+                return Some(path);
+            }
+            if path.is_dir() {
+                if let Some(nested) = find_app_bundle(&path) {
+                    return Some(nested);
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn parse_version(s: &str) -> (u32, u32, u32) {
+    let clean = s.trim().trim_start_matches('v');
+    let mut parts = clean.split('.');
+    let major = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|p| p.split('-').next()).and_then(|p| p.parse().ok()).unwrap_or(0);
+    (major, minor, patch)
+}
+
+pub fn is_version_newer(latest: &str, current: &str) -> bool {
+    parse_version(latest) > parse_version(current)
 }
 
 fn apply_notice(mut state: Signal<AppState>, notice: Notice) {

@@ -5,6 +5,8 @@ use crate::components::{NoticeBanner, PageHeader, Safety};
 use crate::state::{AppState, Screen};
 use crate::util::{pretty, reveal};
 
+const DEFAULT_APP_ICON: Asset = asset!("/assets/sidebar/apps.svg");
+
 #[component]
 pub fn AppsScreen(mut state: Signal<AppState>) -> Element {
     let busy = state.read().busy;
@@ -26,6 +28,7 @@ pub fn AppsScreen(mut state: Signal<AppState>) -> Element {
     let leftovers = state.read().leftovers.clone();
     let leftovers_done = state.read().leftovers_done;
     let selected = state.read().selected_app;
+    let selected_app_obj = selected.and_then(|idx| state.read().apps.get(idx).cloned());
 
     rsx! {
         PageHeader {
@@ -81,6 +84,19 @@ pub fn AppsScreen(mut state: Signal<AppState>) -> Element {
                                 div {
                                     class: "row",
                                     style: if active { "background: var(--accent-soft); border-radius: 10px; padding-left: 8px; padding-right: 8px;" } else { "" },
+                                    if let Some(ref icon) = app.icon_data_url {
+                                        img {
+                                            class: "app-row-icon",
+                                            src: "{icon}",
+                                            alt: "{app.name}",
+                                        }
+                                    } else {
+                                        img {
+                                            class: "app-row-icon",
+                                            src: DEFAULT_APP_ICON,
+                                            alt: "{app.name}",
+                                        }
+                                    }
                                     div { class: "row-body",
                                         div { class: "row-title", "{app.name}" }
                                         div { class: "row-sub", "{app.bundle_id}" }
@@ -110,6 +126,28 @@ pub fn AppsScreen(mut state: Signal<AppState>) -> Element {
                 }
             }
         } else {
+            if let Some(ref sel) = selected_app_obj {
+                div { class: "selected-app-card",
+                    if let Some(ref icon) = sel.icon_data_url {
+                        img {
+                            class: "selected-app-icon",
+                            src: "{icon}",
+                            alt: "{sel.name}",
+                        }
+                    } else {
+                        img {
+                            class: "selected-app-icon",
+                            src: DEFAULT_APP_ICON,
+                            alt: "{sel.name}",
+                        }
+                    }
+                    div {
+                        div { class: "selected-app-title", "{sel.name}" }
+                        div { class: "selected-app-sub", "{sel.bundle_id}" }
+                    }
+                }
+            }
+
             if selected.is_none() {
                 div { class: "card empty",
                     h3 { "Pick an app first" }

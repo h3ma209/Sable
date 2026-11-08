@@ -41,9 +41,9 @@ pub use remove::{RemovalPlan, RemoveTask};
 pub use scan::{run_scan, ScanConfig};
 pub use space::{
     cloud_status, computer_root, deletion_units, home_folder_access, is_spared, normalize_space_path, scan_space,
-    scan_space_volume, space_folder, space_report_at, trash_selected, volume_contains, CloudScannerStrategy, CloudStatus,
+    scan_space_volume, scan_space_volume_with_progress, space_folder, space_report_at, trash_selected, volume_contains, CloudScannerStrategy, CloudStatus,
     DeletionUnit, SpaceEntity, SpaceFolder,
-    SpaceNode, SpaceReport, SpaceVolumeScan, SPACE_LENS_BUBBLE_THRESHOLD,
+    SpaceNode, SpaceProgress, SpaceReport, SpaceVolumeScan, SPACE_LENS_BUBBLE_THRESHOLD,
 };
 pub use threats::{prepare_and_scan, remember_ignore, trash_threat, ThreatHit, ThreatReport};
 

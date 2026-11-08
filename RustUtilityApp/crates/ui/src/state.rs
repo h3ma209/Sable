@@ -106,6 +106,7 @@ pub enum ConfirmKind {
     TrashSpace(Vec<PathBuf>),
     TrashThreat(PathBuf),
     Reindex,
+    InstallUpdate { tag: String, download_url: String },
 }
 
 #[derive(Clone)]
@@ -175,6 +176,10 @@ pub struct AppState {
     pub auto_poll_monitor: bool,
     #[allow(dead_code)]
     pub malware_show_skipped: bool,
+    pub space_progress_bytes: u64,
+    pub space_progress_total_bytes: u64,
+    pub space_progress_items: u64,
+    pub space_progress_current: String,
 }
 
 impl AppState {
@@ -240,6 +245,10 @@ impl AppState {
             clutter_filter: String::new(),
             auto_poll_monitor: true,
             malware_show_skipped: false,
+            space_progress_bytes: 0,
+            space_progress_total_bytes: 0,
+            space_progress_items: 0,
+            space_progress_current: String::new(),
         }
     }
 

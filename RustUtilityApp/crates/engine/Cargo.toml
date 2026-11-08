@@ -1,6 +1,6 @@
 [package]
 name = "engine"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Disk scan and trash plan for Sable"
 license = "MIT"
@@ -9,6 +9,7 @@ categories = ["os", "filesystem"]
 
 [dependencies]
 async-trait = "0.1"
+libc = "0.2"
 thiserror = "2"
 sysinfo = "0.33"
 tokio = { version = "1", features = ["fs", "macros", "rt", "sync", "time"] }

@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::os::darwin::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::access::{folder_access, AccessStatus};
 use crate::cleanup::finder_trash;
+use crate::control::ExecutionControl;
 
 /// `SF_DATALESS`. The scan tests this bit of `st_flags` after `lstat`.
 const SF_DATALESS: u32 = 0x40000000;
@@ -71,6 +73,103 @@ pub struct SpaceNode {
     pub modified: Option<u64>,
 }
 
+/// Real-time scan progress emitted during volume mapping.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SpaceProgress {
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+    pub items_done: u64,
+    pub current_path: String,
+}
+
+pub fn volume_used_bytes(path: &Path) -> Option<u64> {
+    use std::ffi::CString;
+    use std::mem::MaybeUninit;
+    use std::os::unix::ffi::OsStrExt;
+
+    let c_path = CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut stat: MaybeUninit<libc::statvfs> = MaybeUninit::uninit();
+    let res = unsafe { libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
+    if res == 0 {
+        let stat = unsafe { stat.assume_init() };
+        let total = (stat.f_blocks as u64).saturating_mul(stat.f_frsize as u64);
+        let free = (stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64);
+        Some(total.saturating_sub(free))
+    } else {
+        None
+    }
+}
+
+struct ProgressTracker {
+    control: Option<Arc<ExecutionControl>>,
+    tx: Option<tokio::sync::mpsc::UnboundedSender<SpaceProgress>>,
+    bytes_done: AtomicU64,
+    items_done: AtomicU64,
+    bytes_total: AtomicU64,
+    last_emit: Mutex<std::time::Instant>,
+}
+
+impl ProgressTracker {
+    fn new(
+        control: Option<Arc<ExecutionControl>>,
+        tx: Option<tokio::sync::mpsc::UnboundedSender<SpaceProgress>>,
+        initial_total: u64,
+    ) -> Self {
+        Self {
+            control,
+            tx,
+            bytes_done: AtomicU64::new(0),
+            items_done: AtomicU64::new(0),
+            bytes_total: AtomicU64::new(initial_total),
+            last_emit: Mutex::new(std::time::Instant::now()),
+        }
+    }
+
+    fn is_canceled(&self) -> bool {
+        self.control.as_ref().map(|c| c.is_canceled()).unwrap_or(false)
+    }
+
+    fn record_item(&self, bytes: u64, path: &Path) {
+        let done = self.bytes_done.fetch_add(bytes, Ordering::Relaxed) + bytes;
+        let items = self.items_done.fetch_add(1, Ordering::Relaxed) + 1;
+
+        if let Some(ref tx) = self.tx {
+            let mut should_emit = false;
+            if let Ok(mut last) = self.last_emit.try_lock() {
+                if last.elapsed() >= std::time::Duration::from_millis(50) {
+                    *last = std::time::Instant::now();
+                    should_emit = true;
+                }
+            }
+            if should_emit {
+                let mut total = self.bytes_total.load(Ordering::Relaxed);
+                if done >= total {
+                    total = done.saturating_mul(105) / 100;
+                    self.bytes_total.store(total, Ordering::Relaxed);
+                }
+                let _ = tx.send(SpaceProgress {
+                    bytes_done: done,
+                    bytes_total: total,
+                    items_done: items,
+                    current_path: path.display().to_string(),
+                });
+            }
+        }
+    }
+
+    fn finish(&self, final_bytes: u64) {
+        if let Some(ref tx) = self.tx {
+            let items = self.items_done.load(Ordering::Relaxed);
+            let _ = tx.send(SpaceProgress {
+                bytes_done: final_bytes,
+                bytes_total: final_bytes,
+                items_done: items,
+                current_path: "Complete".into(),
+            });
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SpaceReport {
     pub root: PathBuf,
@@ -106,6 +205,14 @@ pub fn normalize_space_path(path: &str) -> String {
 
 /// Builds the full entity tree under `scan_root` once (up to four subtrees at a time).
 pub async fn scan_space_volume(scan_root: PathBuf) -> SpaceVolumeScan {
+    scan_space_volume_with_progress(scan_root, None, None).await
+}
+
+pub async fn scan_space_volume_with_progress(
+    scan_root: PathBuf,
+    control: Option<Arc<ExecutionControl>>,
+    progress_tx: Option<tokio::sync::mpsc::UnboundedSender<SpaceProgress>>,
+) -> SpaceVolumeScan {
     let scan_root = PathBuf::from(normalize_space_path(&scan_root.display().to_string()));
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     let task = Arc::new(create_scan_task(&home));
@@ -114,8 +221,18 @@ pub async fn scan_space_volume(scan_root: PathBuf) -> SpaceVolumeScan {
     let scan_for_task = scan_root.clone();
     let task_bg = Arc::clone(&task);
     let seen_bg = Arc::clone(&seen);
+    let home_clone = home.clone();
     let root = tokio::task::spawn_blocking(move || {
-        build_root_entity(scan_for_task, root_dev, &task_bg, seen_bg)
+        let vol_used = volume_used_bytes(&scan_for_task).unwrap_or(250 * 1024 * 1024 * 1024);
+        let initial_total = if scan_for_task == Path::new("/") || scan_for_task == computer_root() {
+            vol_used
+        } else if scan_for_task.starts_with(&home_clone) {
+            (vol_used * 60) / 100
+        } else {
+            vol_used / 3
+        };
+        let tracker = Arc::new(ProgressTracker::new(control, progress_tx, initial_total));
+        build_root_entity(scan_for_task, root_dev, &task_bg, seen_bg, &tracker)
     })
     .await
     .unwrap_or_else(|_| SpaceEntity {
@@ -214,18 +331,21 @@ fn build_root_entity(
     root_dev: u64,
     task: &Arc<ScanTask>,
     seen: Arc<Mutex<HashSet<(u64, u64)>>>,
+    tracker: &Arc<ProgressTracker>,
 ) -> SpaceEntity {
     if let Ok(meta) = std::fs::symlink_metadata(&scan_root) {
         if let Ok(mut guard) = seen.lock() {
             guard.insert((meta.st_dev(), meta.st_ino()));
         }
     }
+    tracker.record_item(0, &scan_root);
     let entries = directory_entries(task, &scan_root);
-    let mut children = build_children(entries, root_dev, task, &seen, true);
+    let mut children = build_children(entries, root_dev, task, &seen, tracker, true);
     children.sort_by(|a, b| b.bytes.cmp(&a.bytes));
     children.retain(|node| node.bytes > 0 || node.is_directory);
     let bytes = children.iter().fold(0u64, |sum, child| sum.saturating_add(child.bytes));
     let leaves = children.iter().fold(0u64, |sum, child| sum.saturating_add(child.leaves));
+    tracker.finish(bytes);
     SpaceEntity {
         path: scan_root.clone(),
         bytes,
@@ -259,11 +379,15 @@ fn build_children(
     root_dev: u64,
     task: &Arc<ScanTask>,
     seen: &Arc<Mutex<HashSet<(u64, u64)>>>,
+    tracker: &Arc<ProgressTracker>,
     parallel: bool,
 ) -> Vec<SpaceEntity> {
-    if entries.is_empty() {
+    if entries.is_empty() || tracker.is_canceled() {
         return Vec::new();
     }
+    let total_top_entries = entries.len();
+    let completed_top_count = Arc::new(AtomicU64::new(0));
+
     let workers = if parallel {
         MAX_CONCURRENT_SCANS.min(entries.len())
     } else {
@@ -272,7 +396,20 @@ fn build_children(
     if workers <= 1 {
         return entries
             .into_iter()
-            .filter_map(|path| build_entity(path, root_dev, task, seen))
+            .take_while(|_| !tracker.is_canceled())
+            .filter_map(|path| {
+                if tracker.is_canceled() {
+                    return None;
+                }
+                let ent = build_entity(path, root_dev, task, seen, tracker);
+                if parallel && total_top_entries > 0 {
+                    let done_top = completed_top_count.fetch_add(1, Ordering::Relaxed) + 1;
+                    let current_done = tracker.bytes_done.load(Ordering::Relaxed);
+                    let est = (current_done as f64 / (done_top as f64 / total_top_entries as f64)) as u64;
+                    tracker.bytes_total.store(est.max(current_done + 1), Ordering::Relaxed);
+                }
+                ent
+            })
             .collect();
     }
     let chunk_size = entries.len().div_ceil(workers);
@@ -286,11 +423,25 @@ fn build_children(
             .map(|chunk| {
                 let task = Arc::clone(task);
                 let seen = Arc::clone(seen);
+                let tracker = Arc::clone(tracker);
+                let completed_top = Arc::clone(&completed_top_count);
                 scope.spawn(move || {
-                    chunk
-                        .into_iter()
-                        .filter_map(|path| build_entity(path, root_dev, &task, &seen))
-                        .collect::<Vec<_>>()
+                    let mut list = Vec::new();
+                    for path in chunk {
+                        if tracker.is_canceled() {
+                            break;
+                        }
+                        if let Some(ent) = build_entity(path, root_dev, &task, &seen, &tracker) {
+                            list.push(ent);
+                        }
+                        if parallel && total_top_entries > 0 {
+                            let done_top = completed_top.fetch_add(1, Ordering::Relaxed) + 1;
+                            let current_done = tracker.bytes_done.load(Ordering::Relaxed);
+                            let est = (current_done as f64 / (done_top as f64 / total_top_entries as f64)) as u64;
+                            tracker.bytes_total.store(est.max(current_done + 1), Ordering::Relaxed);
+                        }
+                    }
+                    list
                 })
             })
             .collect();
@@ -307,13 +458,16 @@ fn build_entity(
     root_dev: u64,
     task: &Arc<ScanTask>,
     seen: &Arc<Mutex<HashSet<(u64, u64)>>>,
+    tracker: &Arc<ProgressTracker>,
 ) -> Option<SpaceEntity> {
+    if tracker.is_canceled() {
+        return None;
+    }
     let meta = std::fs::symlink_metadata(&path).ok()?;
     let same_volume = meta.st_dev() == root_dev;
     let is_link = meta.file_type().is_symlink();
-    let is_directory = same_volume
-        && (meta.is_dir() && !is_link
-            || is_link && std::fs::metadata(&path).map(|followed| followed.is_dir()).unwrap_or(false));
+    // Do not follow symlinks as directories: avoids loops and duplicated stats!
+    let is_directory = same_volume && meta.is_dir() && !is_link;
     let cloud = cloud_status(
         task.strategy,
         path_is_ubiquitous(&path),
@@ -327,6 +481,7 @@ fn build_entity(
         .map(|duration| duration.as_secs());
 
     if !same_volume {
+        tracker.record_item(0, &path);
         return Some(SpaceEntity {
             path,
             bytes: 0,
@@ -340,6 +495,7 @@ fn build_entity(
     }
 
     if is_directory {
+        tracker.record_item(0, &path);
         let id = (meta.st_dev(), meta.st_ino());
         {
             let mut guard = seen.lock().ok()?;
@@ -357,7 +513,7 @@ fn build_entity(
             }
         }
         let entries = directory_entries(task, &path);
-        let mut children = build_children(entries, root_dev, task, seen, false);
+        let mut children = build_children(entries, root_dev, task, seen, tracker, false);
         children.sort_by(|a, b| b.bytes.cmp(&a.bytes));
         let bytes = children.iter().fold(0u64, |sum, child| sum.saturating_add(child.bytes));
         let leaves = children.iter().fold(0u64, |sum, child| sum.saturating_add(child.leaves));
@@ -387,9 +543,11 @@ fn build_entity(
         });
     }
     let (leaves, _) = leaf_count(false, cloud);
+    let bytes = allocated_bytes(&meta);
+    tracker.record_item(bytes, &path);
     Some(SpaceEntity {
         path,
-        bytes: allocated_bytes(&meta),
+        bytes,
         is_directory: false,
         is_purgeable: false,
         cloud,
@@ -540,7 +698,40 @@ fn ignored(filter: &PathFilter, path: &Path) -> bool {
 
 fn ignored_nofollow(path: &Path) -> bool {
     let text = path.to_string_lossy();
-    text == "/.nofollow" || text.starts_with("/.nofollow/")
+    if text == "/.nofollow" || text.starts_with("/.nofollow/") {
+        return true;
+    }
+    // Never traverse into /Volumes mount loop (mounts back to Macintosh HD / other disks)
+    if text == "/Volumes" || text.starts_with("/Volumes/") {
+        return true;
+    }
+    // Never traverse into /System/Volumes (contains firmlink duplicate Data volume and recursive Volumes loop)
+    if text == "/System/Volumes" || text.starts_with("/System/Volumes/") {
+        return true;
+    }
+    // Pseudo filesystems and automounters
+    if text == "/dev" || text.starts_with("/dev/")
+        || text == "/net" || text.starts_with("/net/")
+        || text == "/home" || text.starts_with("/home/")
+    {
+        return true;
+    }
+    // Internal volume mounts or firmlink loops anywhere in path
+    if text.contains("/Volumes/Macintosh HD") || text.contains("/Data/Volumes") {
+        return true;
+    }
+    // System index and metadata caches
+    if text.starts_with("/.Spotlight-V100")
+        || text.starts_with("/.DocumentRevisions-V100")
+        || text.starts_with("/.fseventsd")
+        || text.starts_with("/.PKInstallSandboxManager")
+        || text.starts_with("/.vol")
+        || text.starts_with("/.MobileBackups")
+        || text.starts_with("/.timemachine")
+    {
+        return true;
+    }
+    false
 }
 
 fn allocated_bytes(meta: &std::fs::Metadata) -> u64 {
@@ -639,7 +830,8 @@ mod tests {
         let root_dev = std::fs::symlink_metadata(&dir).unwrap().st_dev();
         let task = Arc::new(create_scan_task(Path::new("/tmp")));
         let seen = Arc::new(Mutex::new(HashSet::new()));
-        let sub = build_entity(dir.join("sub"), root_dev, &task, &seen).unwrap();
+        let tracker = Arc::new(ProgressTracker::new(None, None, 4096));
+        let sub = build_entity(dir.join("sub"), root_dev, &task, &seen, &tracker).unwrap();
         let root = SpaceEntity {
             path: dir.clone(),
             bytes: sub.bytes,
@@ -672,6 +864,50 @@ mod tests {
         assert_eq!(sub.leaves, 1);
         assert_eq!(report.total, sub.bytes);
         assert!(ignored_nofollow(Path::new("/.nofollow/item")));
+        assert!(ignored_nofollow(Path::new("/Volumes")));
+        assert!(ignored_nofollow(Path::new("/System/Volumes")));
+        assert!(ignored_nofollow(Path::new("/System/Volumes/Data/Volumes/Macintosh HD")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn symlink_directory_not_followed_as_directory() {
+        let dir = std::env::temp_dir().join(format!("rust_utility_space_sym_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let sub = dir.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("file.txt"), b"hello").unwrap();
+        // Symlink pointing back to dir
+        #[cfg(unix)]
+        let _ = std::os::unix::fs::symlink(&sub, dir.join("link_to_sub"));
+
+        let root_dev = std::fs::symlink_metadata(&dir).unwrap().st_dev();
+        let task = Arc::new(create_scan_task(Path::new("/tmp")));
+        let seen = Arc::new(Mutex::new(HashSet::new()));
+        let tracker = Arc::new(ProgressTracker::new(None, None, 4096));
+        let entity = build_entity(dir.join("link_to_sub"), root_dev, &task, &seen, &tracker);
+        if let Some(e) = entity {
+            assert!(!e.is_directory, "Symlink to directory must not be marked as is_directory");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn scan_aborts_on_execution_control_cancellation() {
+        let dir = std::env::temp_dir().join(format!("rust_utility_space_cancel_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..10 {
+            std::fs::write(dir.join(format!("file_{i}.txt")), vec![b'a'; 1024]).unwrap();
+        }
+
+        let control = Arc::new(crate::ExecutionControl::new());
+        control.cancel(); // Pre-cancel
+
+        let volume = scan_space_volume_with_progress(dir.clone(), Some(control), None).await;
+        // Even if some or no items got scanned, volume is returned safely without hanging
+        let canonical = std::fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone());
+        assert_eq!(volume.root.path, canonical);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

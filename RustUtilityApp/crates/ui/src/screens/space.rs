@@ -3,10 +3,13 @@ use std::path::{Path, PathBuf};
 use dioxus::prelude::*;
 use engine::computer_root;
 
-use crate::actions::{space_back, space_forward, space_open, start_space};
+use crate::actions::{space_back, space_forward, space_open, start_space, stop_space};
 use crate::components::{NoticeBanner, PageHeader, Safety};
 use crate::state::{AppState, Screen};
-use crate::util::{file_name, format_bytes, is_dev_artifact, pretty, reveal, space_category_style};
+use crate::util::{file_name, format_bytes, format_count, is_dev_artifact, pretty, reveal, space_category_style};
+
+const ICON_HOUSE: Asset = asset!("/assets/icons/house.svg");
+const ICON_FOLDER: Asset = asset!("/assets/icons/folder.svg");
 
 #[component]
 pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
@@ -18,6 +21,20 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
     let can_forward = !state.read().space_future.is_empty();
     let filter = state.read().space_filter.clone();
     let sort_mode = state.read().space_sort;
+
+    let done_bytes = state.read().space_progress_bytes;
+    let total_bytes = state.read().space_progress_total_bytes.max(done_bytes.max(1));
+    let items = state.read().space_progress_items;
+    let current_path = state.read().space_progress_current.clone();
+    let left_bytes = total_bytes.saturating_sub(done_bytes);
+    let pct = if total_bytes > 0 {
+        ((done_bytes as f64 / total_bytes as f64) * 100.0).clamp(1.0, 99.0)
+    } else {
+        5.0
+    };
+
+    let is_mac = space_root == computer_root().display().to_string() || space_root == "/";
+    let is_home = !is_mac;
 
     let root_path = PathBuf::from(&space_root);
     let mut breadcrumbs: Vec<(String, PathBuf)> = Vec::new();
@@ -40,75 +57,109 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
             screen: Screen::Space,
             subtitle: "One scan builds a map. Click folders or breadcrumbs to drill in without rescanning.",
             safety: Safety::Trash,
-            action_label: Some(if busy { "Scanning…".into() } else { "Rescan".into() }),
-            action_enabled: !busy,
-            on_action: Some(EventHandler::new(move |_| start_space(state, true))),
+            action_label: Some(if busy { "Stop".into() } else { "Rescan".into() }),
+            action_enabled: true,
+            on_action: Some(EventHandler::new(move |_| {
+                if busy {
+                    stop_space(state);
+                } else {
+                    start_space(state, true);
+                }
+            })),
         }
         NoticeBanner { state }
 
-        div { class: "toolbar", style: "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;",
-            button {
-                class: "btn btn-secondary",
-                disabled: !can_back || busy,
-                onclick: move |_| space_back(state),
-                "← Back"
-            }
-            button {
-                class: "btn btn-secondary",
-                disabled: !can_forward || busy,
-                onclick: move |_| space_forward(state),
-                "Forward →"
-            }
-            button {
-                class: "chip",
-                onclick: move |_| {
-                    state.write().space_root = home.display().to_string();
-                    state.write().space_history.clear();
-                    state.write().space_future.clear();
-                    start_space(state, true);
-                },
-                "Home"
-            }
-            button {
-                class: "chip",
-                onclick: move |_| {
-                    state.write().space_root = computer_root().display().to_string();
-                    state.write().space_history.clear();
-                    state.write().space_future.clear();
-                    start_space(state, true);
-                },
-                "This Mac"
+        // Folder Selection Row (distinguished with icons, paths, default Home active)
+        div { class: "space-folder-selector",
+            span { class: "space-selector-label", "Folder:" }
+            div { class: "space-folder-pills",
+                button {
+                    class: if is_home { "space-folder-pill active" } else { "space-folder-pill" },
+                    title: "Scan user home directory (~)",
+                    disabled: busy,
+                    onclick: move |_| {
+                        state.write().space_root = home.display().to_string();
+                        state.write().space_history.clear();
+                        state.write().space_future.clear();
+                        start_space(state, true);
+                    },
+                    img {
+                        class: "folder-pill-icon",
+                        src: ICON_HOUSE,
+                        alt: "",
+                        width: "14",
+                        height: "14",
+                    }
+                    span { class: "folder-pill-name", "Home" }
+                    span { class: "folder-pill-path", "~" }
+                }
+                button {
+                    class: if is_mac { "space-folder-pill active" } else { "space-folder-pill" },
+                    title: "Scan entire Mac disk (/)",
+                    disabled: busy,
+                    onclick: move |_| {
+                        state.write().space_root = computer_root().display().to_string();
+                        state.write().space_history.clear();
+                        state.write().space_future.clear();
+                        start_space(state, true);
+                    },
+                    img {
+                        class: "folder-pill-icon",
+                        src: ICON_FOLDER,
+                        alt: "",
+                        width: "14",
+                        height: "14",
+                    }
+                    span { class: "folder-pill-name", "This Mac" }
+                    span { class: "folder-pill-path", "/" }
+                }
             }
             input {
                 class: "field",
-                style: "max-width: 200px; margin-left: auto;",
+                style: "max-width: 220px; margin-left: auto;",
                 placeholder: "Filter items…",
                 value: "{filter}",
                 oninput: move |e| state.write().space_filter = e.value(),
             }
         }
 
-        // Clickable Breadcrumbs Trail
-        div {
-            class: "row-sub",
-            style: "margin: 6px 0 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 13px;",
-            for (idx, (bname, bpath)) in breadcrumbs.iter().enumerate() {
-                {
-                    let bpath_clone = bpath.clone();
-                    let is_last = idx == breadcrumbs.len() - 1;
-                    rsx! {
-                        button {
-                            class: if is_last { "chip active" } else { "chip" },
-                            style: "padding: 2px 8px; font-size: 12px; cursor: pointer; border-radius: 4px;",
-                            onclick: move |_| {
-                                if !is_last {
-                                    space_open(state, bpath_clone.clone());
-                                }
-                            },
-                            "{bname}"
-                        }
-                        if !is_last {
-                            span { style: "opacity: 0.5;", "›" }
+        // Navigation Row below folder buttons: Back / Forward history + Breadcrumbs trail
+        div { class: "space-nav-row",
+            div { class: "space-history-btns",
+                button {
+                    class: "btn btn-secondary space-nav-btn",
+                    disabled: !can_back || busy,
+                    title: "Go back",
+                    onclick: move |_| space_back(state),
+                    "← Back"
+                }
+                button {
+                    class: "btn btn-secondary space-nav-btn",
+                    disabled: !can_forward || busy,
+                    title: "Go forward",
+                    onclick: move |_| space_forward(state),
+                    "Forward →"
+                }
+            }
+            div { class: "space-breadcrumbs",
+                for (idx, (bname, bpath)) in breadcrumbs.iter().enumerate() {
+                    {
+                        let bpath_clone = bpath.clone();
+                        let is_last = idx == breadcrumbs.len() - 1;
+                        rsx! {
+                            button {
+                                class: if is_last { "chip active" } else { "chip" },
+                                style: "padding: 2px 8px; font-size: 12px; cursor: pointer; border-radius: 4px;",
+                                onclick: move |_| {
+                                    if !is_last {
+                                        space_open(state, bpath_clone.clone());
+                                    }
+                                },
+                                "{bname}"
+                            }
+                            if !is_last {
+                                span { class: "breadcrumb-sep", "›" }
+                            }
                         }
                     }
                 }
@@ -272,7 +323,54 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
                 }
             }
         } else if busy {
-            div { class: "card loading", div { class: "spinner" } "Building disk map..." }
+            div { class: "space-progress-card",
+                    div { class: "space-progress-header",
+                        div { class: "space-progress-title-group",
+                            div { class: "spinner", style: "width: 18px; height: 18px; border-width: 2px;" }
+                            div { class: "space-progress-title", "Scanning & mapping space…" }
+                        }
+                        div { style: "display: flex; align-items: center; gap: 10px;",
+                            span { class: "space-progress-pct", "{pct:.0}%" }
+                            button {
+                                class: "btn btn-secondary",
+                                style: "padding: 3px 10px; font-size: 11px; border-radius: 6px;",
+                                onclick: move |_| stop_space(state),
+                                "Stop"
+                            }
+                        }
+                    }
+
+                    // Progress bar
+                    div { class: "space-progress-track",
+                        div {
+                            class: "space-progress-bar",
+                            style: "width: {pct}%;",
+                        }
+                    }
+
+                    // Stats: Done vs Left vs Items
+                    div { class: "space-progress-stats",
+                        div { class: "stat-box",
+                            span { class: "stat-label", "Amount done" }
+                            span { class: "stat-val done", "{format_bytes(done_bytes)}" }
+                        }
+                        div { class: "stat-box",
+                            span { class: "stat-label", "Amount left" }
+                            span { class: "stat-val left", "{format_bytes(left_bytes)}" }
+                        }
+                        div { class: "stat-box",
+                            span { class: "stat-label", "Items mapped" }
+                            span { class: "stat-val", "{format_count(items)}" }
+                        }
+                    }
+
+                    if !current_path.is_empty() {
+                        div { class: "space-progress-path",
+                            span { class: "path-prefix", "Scanning:" }
+                            span { class: "path-text", "{current_path}" }
+                        }
+                    }
+                }
         } else {
             div { class: "card empty",
                 h3 { "Scan to map this folder" }

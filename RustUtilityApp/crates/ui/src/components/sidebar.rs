@@ -3,6 +3,7 @@ use dioxus::prelude::*;
 use crate::state::{rail_groups, AppState};
 
 const APP_ICON: Asset = asset!("/assets/app_icon.png");
+const ICON_DOWNLOAD: Asset = asset!("/assets/icons/download.svg");
 
 #[component]
 pub fn Sidebar(state: Signal<AppState>) -> Element {
@@ -52,6 +53,23 @@ pub fn Sidebar(state: Signal<AppState>) -> Element {
                             }
                         }
                     }
+                }
+            }
+            div { class: "rail-footer-actions",
+                button {
+                    class: "rail-update-btn",
+                    disabled: busy,
+                    title: "Check for Sable updates",
+                    onclick: move |_| crate::actions::check_for_updates(state),
+                    img {
+                        class: "update-icon",
+                        src: ICON_DOWNLOAD,
+                        alt: "",
+                        width: "14",
+                        height: "14",
+                    }
+                    span { class: "update-btn-text", "Check for Updates" }
+                    span { class: "update-ver-tag", "v{env!(\"CARGO_PKG_VERSION\")}" }
                 }
             }
             div { class: "rail-foot glass",
