@@ -575,11 +575,22 @@ pub fn start_space(mut state: Signal<AppState>, force_rescan: bool) {
     }
 
     let view_folder = folder.clone();
+    let home = state.read().home.clone();
     let volume_scan_root = state
         .read()
         .space_volume
         .as_ref()
-        .map(|volume| volume.scan_root.clone())
+        .and_then(|volume| {
+            if view_folder.starts_with(&volume.scan_root)
+                && view_folder != computer_root()
+                && view_folder != Path::new("/")
+                && view_folder != home
+            {
+                Some(volume.scan_root.clone())
+            } else {
+                None
+            }
+        })
         .unwrap_or_else(|| view_folder.clone());
     let control = Arc::new(ExecutionControl::new());
     let control_for_scan = Arc::clone(&control);
@@ -1366,6 +1377,7 @@ mod tests {
 
     #[test]
     fn test_version_comparison() {
+        assert!(is_version_newer("0.3.7", "0.3.6"));
         assert!(is_version_newer("0.3.6", "0.3.5"));
         assert!(is_version_newer("0.3.5", "0.3.4"));
         assert!(is_version_newer("1.0.0", "0.3.1"));

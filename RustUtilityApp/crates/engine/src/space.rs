@@ -637,18 +637,30 @@ fn path_aliases(path: &Path) -> Vec<PathBuf> {
             push_alias(&mut aliases, home.join(rest));
         }
     }
+    let computer = computer_root();
+    if path == Path::new("/") {
+        push_alias(&mut aliases, computer.clone());
+    } else if path == computer {
+        push_alias(&mut aliases, PathBuf::from("/"));
+    } else if let Ok(rest) = path.strip_prefix(&computer) {
+        push_alias(&mut aliases, Path::new("/").join(rest));
+    } else if let Ok(rest) = path.strip_prefix("/") {
+        push_alias(&mut aliases, computer.join(rest));
+    }
     aliases
 }
 
 fn build_lookup(root: &SpaceEntity) -> HashMap<PathBuf, Vec<usize>> {
     let mut lookup = HashMap::new();
     let (home, data_home) = home_data_context();
+    let computer = computer_root();
     fn walk(
         node: &SpaceEntity,
         index: &[usize],
         lookup: &mut HashMap<PathBuf, Vec<usize>>,
         home: &Path,
         data_home: &Path,
+        computer: &Path,
     ) {
         if node.is_directory {
             let mut aliases = vec![node.path.clone()];
@@ -659,6 +671,15 @@ fn build_lookup(root: &SpaceEntity) -> HashMap<PathBuf, Vec<usize>> {
                     push_alias(&mut aliases, home.join(rest));
                 }
             }
+            if node.path == computer {
+                push_alias(&mut aliases, PathBuf::from("/"));
+            } else if node.path == Path::new("/") {
+                push_alias(&mut aliases, computer.to_path_buf());
+            } else if let Ok(rest) = node.path.strip_prefix(computer) {
+                push_alias(&mut aliases, Path::new("/").join(rest));
+            } else if let Ok(rest) = node.path.strip_prefix("/") {
+                push_alias(&mut aliases, computer.join(rest));
+            }
             for alias in aliases {
                 lookup.entry(alias).or_insert_with(|| index.to_vec());
             }
@@ -667,10 +688,10 @@ fn build_lookup(root: &SpaceEntity) -> HashMap<PathBuf, Vec<usize>> {
             let mut child_index = Vec::with_capacity(index.len() + 1);
             child_index.extend_from_slice(index);
             child_index.push(offset);
-            walk(child, &child_index, lookup, home, data_home);
+            walk(child, &child_index, lookup, home, data_home, computer);
         }
     }
-    walk(root, &[], &mut lookup, &home, &data_home);
+    walk(root, &[], &mut lookup, &home, &data_home, &computer);
     lookup
 }
 
@@ -684,6 +705,9 @@ fn node_at<'a>(root: &'a SpaceEntity, index: &[usize]) -> Option<&'a SpaceEntity
 
 fn find_entity_in_volume<'a>(volume: &'a SpaceVolumeScan, folder: &Path) -> Option<&'a SpaceEntity> {
     for alias in path_aliases(folder) {
+        if alias == volume.scan_root || alias == volume.root.path {
+            return Some(&volume.root);
+        }
         if let Some(index) = volume.lookup.get(&alias) {
             if let Some(node) = node_at(&volume.root, index) {
                 return Some(node);
@@ -989,5 +1013,34 @@ mod tests {
         assert!(nm_entity.bytes >= 8192, "node_modules should contain its full size");
         assert!(nm_entity.children.is_empty(), "node_modules should NOT have children in tree");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn computer_root_aliases_and_root_lookup() {
+        let comp = computer_root();
+        let slash_aliases = path_aliases(Path::new("/"));
+        assert!(slash_aliases.contains(&comp));
+
+        let comp_aliases = path_aliases(&comp);
+        assert!(comp_aliases.contains(&PathBuf::from("/")));
+
+        let dummy_root = SpaceEntity {
+            path: comp.clone(),
+            bytes: 1000,
+            is_directory: true,
+            is_purgeable: false,
+            cloud: CloudStatus::NotCloud,
+            leaves: 1,
+            modified: None,
+            children: Vec::new(),
+        };
+        let vol = new_volume(comp.clone(), dummy_root);
+        assert!(find_entity_in_volume(&vol, &comp).is_some());
+        assert!(find_entity_in_volume(&vol, Path::new("/")).is_some());
+
+        let report_slash = space_report_at(&vol, Path::new("/"));
+        assert!(report_slash.is_some());
+        let report_comp = space_report_at(&vol, &comp);
+        assert!(report_comp.is_some());
     }
 }

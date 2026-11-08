@@ -39,7 +39,7 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
     let mut breadcrumbs: Vec<(String, PathBuf)> = Vec::new();
     let mut curr: Option<&Path> = Some(&root_path);
     while let Some(p) = curr {
-        let name = if p == Path::new("/") {
+        let name = if p == Path::new("/") || p == computer_root() {
             "Macintosh HD".to_string()
         } else if p == home {
             "~ (Home)".to_string()
@@ -47,6 +47,9 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
             file_name(p)
         };
         breadcrumbs.push((name, p.to_path_buf()));
+        if p == computer_root() || p == Path::new("/") || p == home {
+            break;
+        }
         curr = p.parent();
     }
     breadcrumbs.reverse();
@@ -77,6 +80,7 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
                     title: "Scan user home directory (~)",
                     disabled: busy,
                     onclick: move |_| {
+                        state.write().space_volume = None;
                         state.write().space_root = home.display().to_string();
                         state.write().space_history.clear();
                         state.write().space_future.clear();
@@ -97,6 +101,7 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
                     title: "Scan entire Mac disk (/)",
                     disabled: busy,
                     onclick: move |_| {
+                        state.write().space_volume = None;
                         state.write().space_root = computer_root().display().to_string();
                         state.write().space_history.clear();
                         state.write().space_future.clear();

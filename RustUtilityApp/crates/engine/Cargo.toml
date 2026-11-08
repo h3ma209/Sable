@@ -1,6 +1,6 @@
 [package]
 name = "engine"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2021"
 description = "Disk scan and trash plan for Sable"
 license = "MIT"
