@@ -29,6 +29,9 @@ python3 "$root/scripts/make_icon.py" "$iconset"
 iconutil -c icns "$iconset" -o "$app/Contents/Resources/Sable.icns"
 rm -rf "$(dirname "$iconset")"
 
+# Copy UI assets (CSS, icons, fonts) into app bundle resources
+cp -R "$root/crates/ui/assets" "$app/Contents/Resources/assets"
+
 sed "s/VERSION/${version}/g" "$root/packaging/macos/Info.plist" > "$app/Contents/Info.plist"
 plutil -lint "$app/Contents/Info.plist" >/dev/null
 
