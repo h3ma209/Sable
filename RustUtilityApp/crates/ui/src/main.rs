@@ -1,4 +1,5 @@
 mod actions;
+pub mod assets;
 mod components;
 mod screens;
 mod state;
@@ -15,19 +16,20 @@ use state::{AppState, Screen};
 fn main() {
     LaunchBuilder::desktop()
         .with_cfg(
-            Config::new().with_window(
-                WindowBuilder::new()
-                    .with_title("Sable")
-                    .with_inner_size(LogicalSize::new(1180.0, 800.0))
-                    .with_min_inner_size(LogicalSize::new(720.0, 520.0)),
-            ),
+            Config::new()
+                .with_custom_head(format!(
+                    "<style>{}</style>",
+                    assets::STYLESHEET
+                ))
+                .with_window(
+                    WindowBuilder::new()
+                        .with_title("Sable")
+                        .with_inner_size(LogicalSize::new(1180.0, 800.0))
+                        .with_min_inner_size(LogicalSize::new(720.0, 520.0)),
+                ),
         )
         .launch(App);
 }
-
-const CSS: Asset = asset!("/assets/styles.css");
-const _FONT_REGULAR: Asset = asset!("/assets/Sable-Regular.ttf");
-const _FONT_SEMIBOLD: Asset = asset!("/assets/Sable-SemiBold.ttf");
 
 #[component]
 fn App() -> Element {
@@ -43,7 +45,6 @@ fn App() -> Element {
     let _stage_key = format!("{screen:?}");
 
     rsx! {
-        document::Stylesheet { href: CSS }
         div {
             class: "app",
             tabindex: "0",

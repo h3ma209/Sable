@@ -1,9 +1,7 @@
 use dioxus::prelude::*;
 
+use crate::assets::{APP_ICON, ICON_DOWNLOAD};
 use crate::state::{rail_groups, AppState};
-
-const APP_ICON: Asset = asset!("/assets/app_icon.png");
-const ICON_DOWNLOAD: Asset = asset!("/assets/icons/download.svg");
 
 #[component]
 pub fn Sidebar(state: Signal<AppState>) -> Element {

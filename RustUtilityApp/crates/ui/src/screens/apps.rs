@@ -1,11 +1,10 @@
 use dioxus::prelude::*;
 
+use crate::assets::DEFAULT_APP_ICON;
 use crate::actions::{load, survey_selected};
 use crate::components::{NoticeBanner, PageHeader, Safety};
 use crate::state::{AppState, Screen};
 use crate::util::{pretty, reveal};
-
-const DEFAULT_APP_ICON: Asset = asset!("/assets/sidebar/apps.svg");
 
 #[component]
 pub fn AppsScreen(mut state: Signal<AppState>) -> Element {

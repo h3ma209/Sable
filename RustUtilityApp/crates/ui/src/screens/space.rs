@@ -4,12 +4,10 @@ use dioxus::prelude::*;
 use engine::computer_root;
 
 use crate::actions::{space_back, space_forward, space_open, start_space, stop_space};
+use crate::assets::{ICON_FOLDER, ICON_HOUSE};
 use crate::components::{NoticeBanner, PageHeader, Safety};
 use crate::state::{AppState, Screen};
 use crate::util::{file_name, format_bytes, format_count, is_dev_artifact, pretty, reveal, space_category_style};
-
-const ICON_HOUSE: Asset = asset!("/assets/icons/house.svg");
-const ICON_FOLDER: Asset = asset!("/assets/icons/folder.svg");
 
 #[component]
 pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
