@@ -35,6 +35,7 @@ struct PathFilter {
 struct ScanTask {
     filter: PathFilter,
     strategy: CloudScannerStrategy,
+    shallow_dirs: Vec<String>,
 }
 
 /// Full tree node. Sable keeps one `rootNode` on the representation view model
@@ -214,9 +215,18 @@ pub async fn scan_space_volume_with_progress(
     control: Option<Arc<ExecutionControl>>,
     progress_tx: Option<tokio::sync::mpsc::UnboundedSender<SpaceProgress>>,
 ) -> SpaceVolumeScan {
+    scan_space_volume_with_options(scan_root, control, progress_tx, Vec::new()).await
+}
+
+pub async fn scan_space_volume_with_options(
+    scan_root: PathBuf,
+    control: Option<Arc<ExecutionControl>>,
+    progress_tx: Option<tokio::sync::mpsc::UnboundedSender<SpaceProgress>>,
+    shallow_dirs: Vec<String>,
+) -> SpaceVolumeScan {
     let scan_root = PathBuf::from(normalize_space_path(&scan_root.display().to_string()));
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    let task = Arc::new(create_scan_task(&home));
+    let task = Arc::new(create_scan_task(&home, shallow_dirs));
     let root_dev = std::fs::symlink_metadata(&scan_root).map(|meta| meta.st_dev()).unwrap_or(0);
     let seen = Arc::new(Mutex::new(HashSet::new()));
     let scan_for_task = scan_root.clone();
@@ -314,7 +324,7 @@ pub async fn scan_space(root: PathBuf) -> SpaceReport {
     })
 }
 
-fn create_scan_task(home: &Path) -> ScanTask {
+fn create_scan_task(home: &Path, shallow_dirs: Vec<String>) -> ScanTask {
     let reminders = home.join("Library/Reminders");
     let fda_granted = folder_access(&reminders) == AccessStatus::Granted
         || folder_access(&home.join("Library/Mail")) == AccessStatus::Granted;
@@ -324,7 +334,57 @@ fn create_scan_task(home: &Path) -> ScanTask {
             reminders_path: if fda_granted { None } else { Some(reminders) },
         },
         strategy: CloudScannerStrategy::UrlUbiquitousKeys,
+        shallow_dirs,
     }
+}
+
+fn is_shallow_dir(task: &ScanTask, path: &Path) -> bool {
+    if task.shallow_dirs.is_empty() {
+        return false;
+    }
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        let name_lower = name.to_ascii_lowercase();
+        task.shallow_dirs.iter().any(|sh| {
+            let clean = sh.trim().trim_matches('/').to_ascii_lowercase();
+            !clean.is_empty() && (name_lower == clean || name_lower.contains(&clean))
+        })
+    } else {
+        false
+    }
+}
+
+fn fast_dir_sum(dir: &Path, tracker: &ProgressTracker) -> (u64, u64) {
+    let mut bytes = 0u64;
+    let mut leaves = 0u64;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        if tracker.is_canceled() {
+            break;
+        }
+        let entries = match std::fs::read_dir(&current) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            let meta = match std::fs::symlink_metadata(&p) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            if meta.is_dir() {
+                stack.push(p);
+            } else {
+                let file_bytes = allocated_bytes(&meta);
+                bytes = bytes.saturating_add(file_bytes);
+                leaves = leaves.saturating_add(1);
+                tracker.record_item(file_bytes, &p);
+            }
+        }
+    }
+    (bytes, leaves)
 }
 
 fn build_root_entity(
@@ -472,6 +532,23 @@ fn build_entity(
                 });
             }
         }
+
+        // If directory matches exclusion list:
+        // Record its total size but do not dive deeper into child trees.
+        if is_shallow_dir(task, &path) {
+            let (bytes, leaves) = fast_dir_sum(&path, tracker);
+            return Some(SpaceEntity {
+                path,
+                bytes,
+                is_directory: true,
+                is_purgeable: false,
+                cloud,
+                leaves,
+                modified,
+                children: Vec::new(),
+            });
+        }
+
         let entries = directory_entries(task, &path);
         let mut children = build_children(entries, root_dev, task, seen, tracker, depth);
         children.sort_by(|a, b| b.bytes.cmp(&a.bytes));
@@ -807,7 +884,7 @@ mod tests {
         std::fs::write(dir.join("sub/b.txt"), vec![b'x'; 4096]).unwrap();
 
         let root_dev = std::fs::symlink_metadata(&dir).unwrap().st_dev();
-        let task = Arc::new(create_scan_task(Path::new("/tmp")));
+        let task = Arc::new(create_scan_task(Path::new("/tmp"), Vec::new()));
         let seen = Arc::new(Mutex::new(HashSet::new()));
         let tracker = Arc::new(ProgressTracker::new(None, None, 4096));
         let sub = build_entity(dir.join("sub"), root_dev, &task, &seen, &tracker, 0).unwrap();
@@ -863,7 +940,7 @@ mod tests {
         let _ = std::os::unix::fs::symlink(&sub, dir.join("link_to_sub"));
 
         let root_dev = std::fs::symlink_metadata(&dir).unwrap().st_dev();
-        let task = Arc::new(create_scan_task(Path::new("/tmp")));
+        let task = Arc::new(create_scan_task(Path::new("/tmp"), Vec::new()));
         let seen = Arc::new(Mutex::new(HashSet::new()));
         let tracker = Arc::new(ProgressTracker::new(None, None, 4096));
         let entity = build_entity(dir.join("link_to_sub"), root_dev, &task, &seen, &tracker, 0);
@@ -889,6 +966,28 @@ mod tests {
         // Even if some or no items got scanned, volume is returned safely without hanging
         let canonical = std::fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone());
         assert_eq!(volume.root.path, canonical);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn shallow_directory_sums_size_without_children() {
+        let dir = std::env::temp_dir().join(format!("rust_utility_shallow_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let nm = dir.join("node_modules").join("nested");
+        std::fs::create_dir_all(&nm).unwrap();
+        std::fs::write(nm.join("file.bin"), vec![b'z'; 8192]).unwrap();
+
+        let volume = scan_space_volume_with_options(
+            dir.clone(),
+            None,
+            None,
+            vec!["node_modules".to_string()],
+        )
+        .await;
+
+        let nm_entity = volume.root.children.iter().find(|c| c.path.ends_with("node_modules")).expect("node_modules exists");
+        assert!(nm_entity.bytes >= 8192, "node_modules should contain its full size");
+        assert!(nm_entity.children.is_empty(), "node_modules should NOT have children in tree");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

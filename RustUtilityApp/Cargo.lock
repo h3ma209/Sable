@@ -1264,7 +1264,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "engine"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "async-trait",
  "libc",
@@ -3544,7 +3544,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "sable"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "dioxus",
  "engine",

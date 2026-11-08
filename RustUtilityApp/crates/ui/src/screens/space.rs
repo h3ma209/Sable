@@ -18,6 +18,7 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
     let can_back = !state.read().space_history.is_empty();
     let can_forward = !state.read().space_future.is_empty();
     let filter = state.read().space_filter.clone();
+    let space_exclude_dirs = state.read().space_exclude_dirs.clone();
     let sort_mode = state.read().space_sort;
 
     let done_bytes = state.read().space_progress_bytes;
@@ -112,12 +113,23 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
                     span { class: "folder-pill-path", "/" }
                 }
             }
-            input {
-                class: "field",
-                style: "max-width: 220px; margin-left: auto;",
-                placeholder: "Filter items…",
-                value: "{filter}",
-                oninput: move |e| state.write().space_filter = e.value(),
+            div { style: "display: flex; gap: 8px; margin-left: auto; align-items: center;",
+                input {
+                    class: "field",
+                    style: "max-width: 250px; font-size: 11px;",
+                    placeholder: "Exclude (size only): node_modules…",
+                    title: "Folders to measure by size without diving into internal files (comma separated)",
+                    value: "{space_exclude_dirs}",
+                    disabled: busy,
+                    oninput: move |e| state.write().space_exclude_dirs = e.value(),
+                }
+                input {
+                    class: "field",
+                    style: "max-width: 150px; font-size: 11px;",
+                    placeholder: "Filter items…",
+                    value: "{filter}",
+                    oninput: move |e| state.write().space_filter = e.value(),
+                }
             }
         }
 

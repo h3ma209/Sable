@@ -166,6 +166,7 @@ pub struct AppState {
     pub space_history: Vec<String>,
     pub space_future: Vec<String>,
     pub space_filter: String,
+    pub space_exclude_dirs: String,
     pub space_sort: usize, // 0 = Size desc, 1 = Name asc, 2 = Type
     pub apps_tab: usize,
     pub perf_tab: usize,
@@ -215,6 +216,7 @@ impl AppState {
             selected_app: None,
             sample: None,
             space_root,
+            space_exclude_dirs: "node_modules, .gradle, npm, target, build, .git".into(),
             space: None,
             space_volume: None,
             space_selected: HashSet::new(),

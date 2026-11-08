@@ -1,6 +1,6 @@
 [package]
 name = "sable"
-version = "0.3.4"
+version = "0.3.5"
 edition = "2021"
 description = "Mac app for disk space, caches, and downloads you choose to trash"
 license = "MIT"

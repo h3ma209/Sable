@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use engine::{
     flush_dns_cache, folder_access, junk_roots, large_downloads, launch_agents, local_cloud_folders,
     machine_sample, move_download_to_trash, move_root_to_trash, prepare_and_scan, reindex_spotlight,
-    remember_ignore, run_care, run_scan, scan_space_volume_with_progress, space_report_at, spotlight_status,
+    remember_ignore, run_care, run_scan, scan_space_volume_with_options, space_report_at, spotlight_status,
     survey_leftovers, trash_selected, trash_threat as engine_trash_threat, volume_contains,
     computer_root, AccessStatus,
     ExecutionControl, ExtensionWatchDetector, MachineSample, ScanConfig, ScanEvent, SpaceProgress, SpaceReport,
@@ -624,8 +624,21 @@ pub fn start_space(mut state: Signal<AppState>, force_rescan: bool) {
         });
     }
 
+    let shallow_dirs: Vec<String> = state
+        .read()
+        .space_exclude_dirs
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
     spawn(async move {
-        let volume = scan_space_volume_with_progress(scan_root, Some(control_for_scan), Some(tx)).await;
+        let volume = scan_space_volume_with_options(
+            scan_root,
+            Some(control_for_scan),
+            Some(tx),
+            shallow_dirs,
+        ).await;
         let report = space_report_at(&volume, &view_folder).unwrap_or(SpaceReport {
             root: view_folder,
             total: 0,
@@ -1353,11 +1366,11 @@ mod tests {
 
     #[test]
     fn test_version_comparison() {
+        assert!(is_version_newer("0.3.5", "0.3.4"));
         assert!(is_version_newer("0.3.4", "0.3.3"));
-        assert!(is_version_newer("0.3.3", "0.3.2"));
         assert!(is_version_newer("1.0.0", "0.3.1"));
-        assert!(!is_version_newer("0.3.3", "0.3.3"));
-        assert!(!is_version_newer("0.3.2", "0.3.3"));
+        assert!(!is_version_newer("0.3.4", "0.3.4"));
+        assert!(!is_version_newer("0.3.3", "0.3.4"));
     }
 
     #[test]
