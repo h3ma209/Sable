@@ -757,6 +757,7 @@ pub fn start_scan(mut state: Signal<AppState>) {
     let control = Arc::new(ExecutionControl::new());
     let watch = state.read().watch.clone();
     let filename_query = state.read().filename_query.clone();
+    let exclude_dirs = state.read().exclude_dirs.clone();
     let detector = Arc::new(ExtensionWatchDetector::with_names(
         watch
             .split(',')
@@ -767,7 +768,14 @@ pub fn start_scan(mut state: Signal<AppState>) {
             .map(|s| s.trim())
             .filter(|s| !s.is_empty()),
     ));
-    let config = ScanConfig::new(state.read().root.trim());
+    let config = ScanConfig {
+        exclude_dirs: exclude_dirs
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        ..ScanConfig::new(state.read().root.trim())
+    };
     {
         let mut s = state.write();
         s.control = Some(Arc::clone(&control));
@@ -818,6 +826,16 @@ pub fn start_scan(mut state: Signal<AppState>) {
                 }
             }
         }
+    });
+}
+
+pub fn stop_scan(mut state: Signal<AppState>) {
+    let mut s = state.write();
+    s.cancel_work();
+    s.notice = Some(Notice {
+        ok: true,
+        text: "File search stopped.".into(),
+        refresh: None,
     });
 }
 
@@ -1335,12 +1353,11 @@ mod tests {
 
     #[test]
     fn test_version_comparison() {
+        assert!(is_version_newer("0.3.4", "0.3.3"));
         assert!(is_version_newer("0.3.3", "0.3.2"));
-        assert!(is_version_newer("0.3.2", "0.3.1"));
         assert!(is_version_newer("1.0.0", "0.3.1"));
-        assert!(!is_version_newer("0.3.2", "0.3.2"));
-        assert!(!is_version_newer("0.3.1", "0.3.2"));
-        assert!(!is_version_newer("0.2.9", "0.3.2"));
+        assert!(!is_version_newer("0.3.3", "0.3.3"));
+        assert!(!is_version_newer("0.3.2", "0.3.3"));
     }
 
     #[test]

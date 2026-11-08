@@ -16,6 +16,7 @@ pub struct ScanConfig {
     pub chunk_size: usize,
     pub follow_symlinks: bool,
     pub check_concurrency: usize,
+    pub exclude_dirs: Vec<String>,
 }
 
 impl ScanConfig {
@@ -25,6 +26,7 @@ impl ScanConfig {
             chunk_size: 64,
             follow_symlinks: false,
             check_concurrency: 8,
+            exclude_dirs: Vec::new(),
         }
     }
 }
@@ -42,8 +44,20 @@ pub async fn run_scan(
 
     let (chunk_tx, mut chunk_rx) = mpsc::channel(4);
     let walk_control = Arc::clone(&control);
+    let exclude_dirs = config.exclude_dirs.clone();
     let walk_opts = WalkOptions {
         follow_symlinks: config.follow_symlinks,
+        skip_dir: Arc::new(move |path: &std::path::Path| {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                let name_lower = name.to_ascii_lowercase();
+                exclude_dirs.iter().any(|ex| {
+                    let ex_clean = ex.trim().trim_matches('/').to_ascii_lowercase();
+                    !ex_clean.is_empty() && (name_lower == ex_clean || name_lower.contains(&ex_clean))
+                })
+            } else {
+                false
+            }
+        }),
         ..WalkOptions::new(config.root.clone(), config.chunk_size)
     };
     let walk = tokio::spawn(async move { enumerate::walk(walk_opts, &walk_control, chunk_tx).await });

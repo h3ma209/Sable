@@ -127,6 +127,43 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[tokio::test]
+    async fn scan_respects_exclude_dirs() {
+        let dir = std::env::temp_dir().join(format!("rust_utility_exclude_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let nm = dir.join("node_modules");
+        let gradle = dir.join(".gradle");
+        let normal = dir.join("src");
+        std::fs::create_dir_all(&nm).unwrap();
+        std::fs::create_dir_all(&gradle).unwrap();
+        std::fs::create_dir_all(&normal).unwrap();
+
+        std::fs::write(nm.join("pkg.dmg"), b"no").unwrap();
+        std::fs::write(gradle.join("cache.dmg"), b"no").unwrap();
+        std::fs::write(normal.join("valid.dmg"), b"yes").unwrap();
+
+        let control = Arc::new(ExecutionControl::new());
+        let detector = Arc::new(ExtensionWatchDetector::new(["dmg"]));
+        let (tx, mut rx) = mpsc::channel(32);
+        let config = ScanConfig {
+            chunk_size: 1,
+            check_concurrency: 2,
+            exclude_dirs: vec!["node_modules".into(), ".gradle".into()],
+            ..ScanConfig::new(&dir)
+        };
+        run_scan(config, detector, control, tx).await;
+
+        let mut hits = Vec::new();
+        while let Some(event) = rx.recv().await {
+            if let ScanEvent::Detection(hit) = event {
+                hits.push(hit);
+            }
+        }
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].path.ends_with("valid.dmg"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn trash_refuses_paths_outside_cache_roots() {
         let err = move_root_to_trash(std::path::Path::new("/tmp"), std::path::Path::new("/etc")).unwrap_err();
