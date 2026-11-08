@@ -125,6 +125,7 @@ pub struct AppState {
     pub screen: Screen,
     pub home: PathBuf,
     pub root: String,
+    pub filename_query: String,
     pub watch: String,
     pub status: &'static str,
     pub notice: Option<Notice>,
@@ -189,6 +190,7 @@ impl AppState {
         Self {
             screen: Screen::Care,
             root: home.join("Downloads").display().to_string(),
+            filename_query: String::new(),
             home,
             watch: "dmg,pkg".into(),
             status: "idle",

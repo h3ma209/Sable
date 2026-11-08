@@ -756,10 +756,15 @@ pub fn start_scan(mut state: Signal<AppState>) {
     }
     let control = Arc::new(ExecutionControl::new());
     let watch = state.read().watch.clone();
-    let detector = Arc::new(ExtensionWatchDetector::new(
+    let filename_query = state.read().filename_query.clone();
+    let detector = Arc::new(ExtensionWatchDetector::with_names(
         watch
             .split(',')
             .map(|s| s.trim().trim_start_matches('.'))
+            .filter(|s| !s.is_empty()),
+        filename_query
+            .split(',')
+            .map(|s| s.trim())
             .filter(|s| !s.is_empty()),
     ));
     let config = ScanConfig::new(state.read().root.trim());
@@ -1330,11 +1335,12 @@ mod tests {
 
     #[test]
     fn test_version_comparison() {
+        assert!(is_version_newer("0.3.3", "0.3.2"));
         assert!(is_version_newer("0.3.2", "0.3.1"));
         assert!(is_version_newer("1.0.0", "0.3.1"));
-        assert!(!is_version_newer("0.3.1", "0.3.1"));
-        assert!(!is_version_newer("0.3.0", "0.3.1"));
-        assert!(!is_version_newer("0.2.9", "0.3.1"));
+        assert!(!is_version_newer("0.3.2", "0.3.2"));
+        assert!(!is_version_newer("0.3.1", "0.3.2"));
+        assert!(!is_version_newer("0.2.9", "0.3.2"));
     }
 
     #[test]
