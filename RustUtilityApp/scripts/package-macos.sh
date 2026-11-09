@@ -25,7 +25,14 @@ chmod +x "$app/Contents/MacOS/Sable"
 printf 'APPL????' > "$app/Contents/PkgInfo"
 
 iconset="$(mktemp -d)/Sable.iconset"
-python3 "$root/scripts/make_icon.py" "$iconset"
+icon_python="python3"
+if ! python3 -c "import PIL" 2>/dev/null; then
+  venv="$root/.venv-packaging"
+  python3 -m venv "$venv"
+  "$venv/bin/pip" install -q pillow
+  icon_python="$venv/bin/python3"
+fi
+"$icon_python" "$root/scripts/make_icon.py" "$iconset"
 iconutil -c icns "$iconset" -o "$app/Contents/Resources/Sable.icns"
 rm -rf "$(dirname "$iconset")"
 
