@@ -29,7 +29,7 @@ icon_python="python3"
 if ! python3 -c "import PIL" 2>/dev/null; then
   venv="$root/.venv-packaging"
   python3 -m venv "$venv"
-  "$venv/bin/pip" install -q pillow
+  "$venv/bin/pip" install -q pillow numpy
   icon_python="$venv/bin/python3"
 fi
 "$icon_python" "$root/scripts/make_icon.py" "$iconset"
