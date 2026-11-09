@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sable — Native macOS Disk Utility</title>
-  <meta name="description" content="A lightweight, high-performance Mac utility written in Rust. Reclaims disk space and analyzes system health with full safety.">
+  <meta name="description" content="Free, open-source CleanMyMac alternative for macOS. Trash-safe cleanup, Space Lens, no subscription — built in Rust.">
   <link rel="icon" type="image/png" href="assets/app_icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -170,12 +170,55 @@
     .copy-btn:hover { background: #1c1c1c; border-color: rgba(255,255,255,0.2); }
 
     /* Action buttons */
+    .install-stack {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 28px;
+      width: 100%;
+      max-width: 720px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .install-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-sub);
+      width: 100%;
+      text-align: left;
+      margin-top: 8px;
+    }
+    .install-label.warn { color: #c9a227; }
     .actions {
       display: flex;
       gap: 12px;
       justify-content: center;
       align-items: center;
       margin-bottom: 72px;
+      flex-wrap: wrap;
+    }
+    .transparency {
+      margin-bottom: 72px;
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 28px 32px;
+    }
+    .transparency h2 {
+      font-size: 1.25rem;
+      margin-bottom: 12px;
+      letter-spacing: -0.02em;
+    }
+    .transparency p, .transparency li {
+      color: var(--text-muted);
+      font-size: 0.92rem;
+    }
+    .transparency ul {
+      margin: 12px 0 0 1.2rem;
+      line-height: 1.65;
     }
     .btn-main {
       background: var(--text);
@@ -336,24 +379,32 @@
       <div style="display: flex; gap: 10px; justify-content: center; align-items: center; margin-bottom: 24px; flex-wrap: wrap;">
         <div class="badge" style="margin-bottom: 0;">
           <span class="badge-dot"></span>
-          <span>Version 0.3.7 · macOS 12+</span>
+          <span>Open source · macOS 12+</span>
         </div>
         <a href="https://github.com/h3ma209/Sable/releases" class="badge" style="margin-bottom: 0; text-decoration: none; color: var(--text-dim);" title="Total downloads across all releases">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
           <span id="download-count">40+ downloads</span>
         </a>
       </div>
-      <h1>Lightweight disk control<br>for Apple Silicon & Intel.</h1>
-      <p class="hero-sub">Sable audits disk storage, detects residual uninstaller clutter, and sweeps caches directly to the Trash with zero analytics.</p>
+      <h1>Free, open-source<br>CleanMyMac alternative.</h1>
+      <p class="hero-sub">No subscription, no analytics. Cache and log cleanup goes to the Trash first. Space Lens, leftovers, and a native Rust UI for Apple Silicon and Intel.</p>
 
-      <div class="terminal-box">
-        <div class="terminal-code">
-          curl -sSL <span>https://raw.githubusercontent.com/h3ma209/Sable/master/install.sh</span> | bash
+      <div class="install-stack">
+        <div class="install-label">Build from source</div>
+        <div class="terminal-box" style="width:100%; justify-content: space-between;">
+          <div class="terminal-code">git clone .../Sable.git &amp;&amp; cd Sable/RustUtilityApp &amp;&amp; <span>make package</span></div>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText('git clone https://github.com/h3ma209/Sable.git && cd Sable/RustUtilityApp && cargo test && make package'); this.innerText='Copied!'; setTimeout(() => this.innerText='Copy', 2000)">Copy</button>
         </div>
-        <button class="copy-btn" onclick="navigator.clipboard.writeText('curl -sSL https://raw.githubusercontent.com/h3ma209/Sable/master/install.sh | bash'); this.innerText='Copied!'; setTimeout(() => this.innerText='Copy', 2000)">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-          Copy
-        </button>
+        <div class="install-label">Homebrew (after tap publish)</div>
+        <div class="terminal-box" style="width:100%; justify-content: space-between;">
+          <div class="terminal-code"><span>brew tap h3ma209/sable</span> &amp;&amp; brew install --cask sable</div>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText('brew tap h3ma209/sable && brew install --cask sable'); this.innerText='Copied!'; setTimeout(() => this.innerText='Copy', 2000)">Copy</button>
+        </div>
+        <div class="install-label warn">Advanced — review script; optional Gatekeeper quarantine bypass</div>
+        <div class="terminal-box" style="width:100%; justify-content: space-between;">
+          <div class="terminal-code">SABLE_VERIFY=1 bash install-sable.sh <span># SABLE_CLEAR_QUARANTINE=1 optional</span></div>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText('curl -fsSL https://raw.githubusercontent.com/h3ma209/Sable/master/install.sh -o install-sable.sh && less install-sable.sh && SABLE_VERIFY=1 bash install-sable.sh'); this.innerText='Copied!'; setTimeout(() => this.innerText='Copy', 2000)">Copy</button>
+        </div>
       </div>
 
       <div class="actions">
@@ -368,7 +419,7 @@
       </div>
 
       <div class="hero-preview">
-        <img src="assets/preview.png" alt="Sable Space Lens UI" loading="lazy">
+        <img src="assets/preview.gif" alt="Sable Space Lens UI" loading="lazy" width="900">
       </div>
     </header>
 
@@ -427,6 +478,17 @@
         <div class="card-desc">Verifies executable hashes in Downloads against known signature collections in seconds.</div>
       </div>
     </div>
+
+    <section class="transparency">
+      <h2>Transparency</h2>
+      <p>Routine cleanup stays in user space. The engine only batch-trashes paths it surveyed under your home folder (caches, logs, DerivedData, and similar). Everything else needs explicit per-file confirmation.</p>
+      <ul>
+        <li><strong>No <code>sudo</code></strong> for standard cache sweeps — admin may be requested only for optional Tune-Up tools.</li>
+        <li><strong>Trash only</strong> — Finder integration, not permanent delete.</li>
+        <li><strong>Verify releases</strong> — download <code>SHA256SUMS.txt</code> with each release and run <code>shasum -a 256 --check SHA256SUMS.txt</code>.</li>
+        <li><strong>Report issues</strong> — see <a href="https://github.com/h3ma209/Sable/blob/master/SECURITY.md" style="color: var(--accent);">SECURITY.md</a> for private disclosure.</li>
+      </ul>
+    </section>
 
     <!-- Safety Architecture -->
     <div class="safety-strip">

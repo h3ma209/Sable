@@ -5,8 +5,8 @@
 <h1 align="center">Sable</h1>
 
 <p align="center">
-  <strong>Fast, private, and safe macOS disk cleaner & system monitor written in Rust.</strong><br>
-  Scans storage footprint, clears stale caches & logs, sweeps application leftovers, and puts everything in the Trash for safe recovery.
+  <strong>The free, open-source, subscription-free CleanMyMac alternative.</strong><br>
+  Disk cleanup, space analysis, and system monitoring for macOS — MIT licensed, no analytics, deletes via Trash.
 </p>
 
 <p align="center">
@@ -18,64 +18,114 @@
 </p>
 
 <p align="center">
-  <img src="assets/preview.png" width="900" alt="Sable Space Lens UI" style="border-radius: 12px; box-shadow: 0 20px 40px rgba(0,0,0,0.4);">
+  <img src="assets/preview.gif" width="900" alt="Sable Space Lens UI preview" style="border-radius: 12px; box-shadow: 0 20px 40px rgba(0,0,0,0.4);">
 </p>
 
 ---
 
-## ⚡ Quick Install (One-Liner)
+## Install
 
-Install and automatically grant macOS permissions with a single terminal command:
+Pick the path that matches your threat model.
+
+### 1. Build from source (highest trust)
+
+Requires **Rust 1.80+** on macOS:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/h3ma209/Sable/master/install.sh | bash
+git clone https://github.com/h3ma209/Sable.git
+cd Sable/RustUtilityApp
+cargo test
+make package
+open dist/Sable-*.dmg
 ```
 
-> **What this does:**
-> 1. Detects Apple Silicon (`arm64`) vs. Intel (`x64`).
-> 2. Downloads and extracts the latest release into `/Applications/Sable.app`.
-> 3. Runs `xattr -cr /Applications/Sable.app` to clear the quarantine flag so Gatekeeper allows it immediately.
-> 4. Launches the app.
+You compile the same code that ships in releases — no pre-built binary required.
+
+### 2. Homebrew (power users)
+
+Publish the cask from [`packaging/homebrew/Casks/sable.rb`](packaging/homebrew/Casks/sable.rb) in a `homebrew-sable` tap, then:
+
+```bash
+brew tap h3ma209/sable
+brew install --cask sable
+```
+
+Update `version` and `sha256` in the cask after each release using `SHA256SUMS.txt`.
+
+### 3. Verified binary (GitHub Releases)
+
+1. Download the `.dmg` or `.zip` from [Latest Release](https://github.com/h3ma209/Sable/releases/latest) for your Mac (**arm64** or **x64**).
+2. Download **`SHA256SUMS.txt`** from the same release.
+3. Verify:
+
+```bash
+cd ~/Downloads
+shasum -a 256 --check SHA256SUMS.txt
+```
+
+4. Open the `.dmg`, drag **Sable** to **Applications**.
+5. First launch: **Control-click → Open** (releases are not Apple-notarized yet).
+
+### 4. Convenience script (review before running)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/h3ma209/Sable/master/install.sh -o install-sable.sh
+less install-sable.sh
+SABLE_VERIFY=1 bash install-sable.sh
+```
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SABLE_VERIFY=1` | off | Require matching `SHA256SUMS.txt` on the release |
+| `SABLE_CLEAR_QUARANTINE=1` | off | **Advanced:** run `xattr -cr` to strip Gatekeeper quarantine |
+
+**Bypass Apple Gatekeeper quarantine (advanced users only):** only set `SABLE_CLEAR_QUARANTINE=1` if you already verified the artifact and accept removing the download quarantine flag.
 
 ---
 
-## 💾 Manual Install
+## Transparency — what Sable touches
 
-1. Download the disk image from the [Latest Release](https://github.com/h3ma209/Sable/releases/latest):
-   - **Apple Silicon (M1/M2/M3/M4):** `Sable-*-macos-arm64.dmg`
-   - **Intel:** `Sable-*-macos-x64.dmg`
-2. Open the `.dmg` and drag **Sable** to **Applications**.
-3. If macOS displays an *unidentified developer* notice on first launch:
-   ```bash
-   xattr -cr /Applications/Sable.app
-   ```
-   *Or Control-click Sable in `/Applications` and choose **Open**.*
+Routine cleanup is **user-space** only. The engine enumerates fixed roots (see `cleanup.rs`); batch trash refuses anything outside that survey list.
+
+| Area | Typical paths | Notes |
+| --- | --- | --- |
+| User caches | `~/Library/Caches`, app-specific caches | Survey + optional Trash |
+| Logs | `~/Library/Logs`, DiagnosticReports | Survey + optional Trash |
+| Developer junk | `~/Library/Developer/Xcode/DerivedData`, CoreSimulator, Cargo, npm, etc. | Optional profiles |
+| Downloads | files under `~/Downloads` | Big downloads / threat actions only |
+| Apps & leftovers | `/Applications`, `~/Library/Application Support`, Group Containers | Read + selective Trash |
+| Space Lens | volumes you can browse in Finder | May benefit from **Full Disk Access** (optional) |
+
+**Privileges:** everyday cache cleanup does **not** use `sudo`. Tune-Up (DNS flush, Spotlight via `mdutil`, etc.) may invoke tools that prompt for admin separately — the UI labels those actions.
+
+**Deletes:** confirmed removals go to **macOS Trash** via Finder (`osascript`), not permanent `rm`.
+
+**Network:** no analytics. Threat scan may fetch a hash list; app updates check GitHub Releases when you opt in.
+
+See [SECURITY.md](SECURITY.md) for disclosure and review notes.
 
 ---
 
-## 🌟 Features
+## Features
 
 | Module | Description |
-|---|---|
-| **Overview** | Instant health check of cache sizes, downloads, and system load. |
-| **Free Up Space** | Reclaims user caches, Xcode DerivedData, logs, with 1-click **Clean All**. |
-| **Space Lens** | Fast disk tree hierarchy with real-time search, clickable breadcrumbs, category tags, and Finder buttons. |
-| **Apps & Leftovers** | Scans `/Applications` and detects residual files in `Application Support`, `Group Containers`, and `WebKit`. |
-| **Tune-Up** | Inspects user `LaunchAgents`, flushes DNS cache, and controls Spotlight indexing. |
-| **Big Downloads** | Finds large downloads (50MB+) with search filters and Trash confirmation. |
-| **Threat Scan** | Hash comparison against known malicious binaries in Downloads. |
-| **System Monitor** | Live CPU and RAM telemetry auto-refreshing every 2 seconds. |
-
-> [!NOTE]
-> **Safety First:** Nothing is permanently deleted without your explicit confirmation. All file removals use the native macOS Trash so items can be restored anytime.
+| --- | --- |
+| **Overview** | Cache sizes, downloads, system load at a glance. |
+| **Free Up Space** | User caches, Xcode DerivedData, logs — **Clean All** with confirmation. |
+| **Space Lens** | Disk tree, search, breadcrumbs, Finder reveal. |
+| **Apps & Leftovers** | `/Applications` + residual support files. |
+| **Tune-Up** | LaunchAgents, DNS cache, Spotlight status. |
+| **Big Downloads** | Large files in Downloads → Trash. |
+| **Threat Scan** | Hash check for known bad binaries in Downloads (not a full AV). |
+| **System Monitor** | CPU / RAM refresh ~2s. |
 
 ---
 
-## ⌨️ Keyboard Shortcuts
+## Keyboard shortcuts
 
-- `Cmd+1` → Home / Overview
+- `Cmd+1` → Overview
 - `Cmd+2` → Free Up Space
-- `Cmd+3` → Installed Apps & Leftovers
+- `Cmd+3` → Apps & Leftovers
 - `Cmd+4` → Tune-Up
 - `Cmd+5` → File Finder
 - `Cmd+6` → Threat Scan
@@ -83,28 +133,16 @@ curl -sSL https://raw.githubusercontent.com/h3ma209/Sable/master/install.sh | ba
 - `Cmd+8` → Space Lens
 - `Cmd+9` → Cloud Storage
 - `Cmd+0` → System Monitor
-- `Escape` → Close any open confirmation modal
+- `Escape` → Close modals
 
 ---
 
-## 🛠️ Build From Source
+## Code signing
 
-Requires **Rust 1.80+** and macOS:
-
-```bash
-git clone https://github.com/h3ma209/Sable.git
-cd Sable/RustUtilityApp
-
-# Build & test
-cargo test
-
-# Package macOS App & DMG
-make package
-open dist/Sable-*.dmg
-```
+CI builds ad-hoc or Developer ID signing when `APPLE_SIGNING_IDENTITY` is set. Public releases may still show **unidentified developer** until notarized builds are published — prefer source builds or checksum-verified DMGs if that matters to you.
 
 ---
 
-## 📄 License
+## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE).

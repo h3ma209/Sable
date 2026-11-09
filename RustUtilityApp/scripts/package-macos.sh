@@ -48,12 +48,30 @@ echo "Signing with identity: ${SIGNING_IDENTITY}"
 codesign --force --options runtime --sign "${SIGNING_IDENTITY}" "$app"
 codesign --verify --verbose=2 "$app"
 
-# Optional Apple notarization if NOTARIZE_PROFILE is configured
-if [[ -n "${NOTARIZE_PROFILE:-}" && "${SIGNING_IDENTITY}" != "-" ]]; then
-  echo "Submitting to Apple notary service using profile: ${NOTARIZE_PROFILE}"
-  xcrun notarytool submit "$app" --keychain-profile "${NOTARIZE_PROFILE}" --wait
-  xcrun stapler staple "$app"
-fi
+# Optional Apple notarization (real Developer ID signing required)
+notarize_app() {
+  local target="$1"
+  if [[ "${SIGNING_IDENTITY}" == "-" ]]; then
+    return 0
+  fi
+  if [[ -n "${NOTARY_APPLE_ID:-}" && -n "${NOTARY_APP_PASSWORD:-}" && -n "${NOTARY_TEAM_ID:-}" ]]; then
+    echo "Notarizing with notarytool (CI / API credentials)..."
+    xcrun notarytool submit "$target" --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_APP_PASSWORD" --team-id "$NOTARY_TEAM_ID" --wait
+    return 0
+  fi
+  if [[ -n "${NOTARIZE_PROFILE:-}" ]]; then
+    echo "Submitting to Apple notary service using profile: ${NOTARIZE_PROFILE}"
+    xcrun notarytool submit "$target" --keychain-profile "${NOTARIZE_PROFILE}" --wait
+    return 0
+  fi
+}
+
+staple_app() {
+  if [[ "${SIGNING_IDENTITY}" == "-" ]]; then
+    return 0
+  fi
+  xcrun stapler staple "$1" 2>/dev/null || true
+}
 
 arch_name="$(uname -m)"
 case "$arch_name" in
@@ -68,6 +86,10 @@ ln -s /Applications "$stage/Applications"
 dmg="$root/dist/Sable-${version}-macos-${arch_label}.dmg"
 hdiutil create -volname "Sable" -srcfolder "$stage" -ov -format UDZO "$dmg"
 rm -rf "$stage"
+
+notarize_app "$dmg"
+staple_app "$dmg"
+staple_app "$app"
 
 zip="$root/dist/Sable-${version}-macos-${arch_label}.zip"
 rm -f "$zip"
