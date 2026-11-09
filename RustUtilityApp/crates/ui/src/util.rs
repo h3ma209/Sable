@@ -11,6 +11,22 @@ pub fn describe_junk(label: &str) -> &'static str {
         "Spotify cache" => "Songs Spotify stored for faster playback. It downloads them again if needed.",
         "Adobe media cache" => "Preview files from Adobe video and audio apps. Rebuilt on demand.",
         "Xcode derived data" => "Build files from Xcode. The next build recreates them.",
+        "Safari cache" => "Web pages Safari kept for faster loading.",
+        "Mail downloads" => "Attachments Mail saved locally.",
+        "pip cache" => "Downloaded Python packages. Pip fetches again when needed.",
+        "npm cache" => "Cached npm packages for Node projects.",
+        "Homebrew cache" => "Downloaded formulae bottles. Homebrew re-downloads on install.",
+        "Xcode Archives" => "Old .ipa / archive exports from Xcode.",
+        "Xcode iOS DeviceSupport" => "Symbols copied from devices you plugged in.",
+        "CoreSimulator caches" => "iOS Simulator temp data.",
+        "Cargo registry" => "Downloaded Rust crates. Cargo restores on build.",
+        "Cargo git checkouts" => "Git dependencies Cargo cloned.",
+        "Gradle caches" => "Android/Java build cache.",
+        "Yarn cache" => "Yarn package tarballs.",
+        "pnpm store" => "pnpm content-addressable package store.",
+        "Go build cache" => "Compiled Go objects for faster rebuilds.",
+        "Docker local data" => "Local Docker images and layer cache.",
+        "Node modules (Projects)" => "Whole node_modules tree under ~/Projects if present.",
         _ => "Temporary files that apps can recreate.",
     }
 }
@@ -166,12 +182,114 @@ pub fn space_category_style(is_dir: bool, name: &str) -> (&'static str, &'static
     }
 }
 
+pub fn push_monitor_spark(buf: &mut Vec<f32>, value: f32) {
+    buf.push(value.clamp(0.0, 1.0));
+    const MAX: usize = 96;
+    if buf.len() > MAX {
+        buf.drain(0..buf.len() - MAX);
+    }
+}
+
+pub fn monitor_chart_max(values: &[f32], floor: f32) -> f32 {
+    values
+        .iter()
+        .cloned()
+        .fold(floor, f32::max)
+        .max(floor)
+}
+
+pub fn monitor_area_path(values: &[f32], width: f32, height: f32, max: f32) -> String {
+    if values.is_empty() {
+        return String::new();
+    }
+    let max = max.max(0.08);
+    let step = width / (values.len().saturating_sub(1).max(1) as f32);
+    let mut path = String::from("M 0 ");
+    path.push_str(&format!("{:.1}", height));
+    for (i, v) in values.iter().enumerate() {
+        let x = i as f32 * step;
+        let y = height - (v / max * height * 0.9 + height * 0.05);
+        path.push_str(&format!(" L {x:.1} {y:.1}"));
+    }
+    let last_x = (values.len() - 1) as f32 * step;
+    path.push_str(&format!(" L {last_x:.1} {height} L 0 {height} Z"));
+    path
+}
+
+pub fn monitor_sparkline_points(values: &[f32], width: f32, height: f32) -> String {
+    if values.is_empty() {
+        return String::new();
+    }
+    let max = values
+        .iter()
+        .cloned()
+        .fold(0.08f32, |a, b| a.max(b))
+        .max(1.0);
+    let step = width / (values.len().saturating_sub(1).max(1) as f32);
+    values
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let x = i as f32 * step;
+            let y = height - (v / max * height * 0.92 + height * 0.04);
+            format!("{x:.1},{y:.1}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub fn monitor_ring_color(class: &str) -> &'static str {
+    match class {
+        "danger" => "#ff6b6b",
+        "warn" => "#f5b942",
+        _ => "#1ed760",
+    }
+}
+
+pub fn format_uptime(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else if secs < 86_400 {
+        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+    } else {
+        format!("{}d {}h", secs / 86_400, (secs % 86_400) / 3600)
+    }
+}
+
+/// 0–100 health score from CPU, memory, swap fractions (0–1 each).
+pub fn monitor_health_score(cpu: f32, mem: f32, swap: f32) -> u8 {
+    let stress = cpu * 0.45 + mem * 0.4 + swap * 0.15;
+    ((1.0 - stress.clamp(0.0, 1.0)) * 100.0).round() as u8
+}
+
+pub fn monitor_health_label(score: u8) -> &'static str {
+    match score {
+        85..=100 => "Excellent",
+        70..=84 => "Good",
+        50..=69 => "Fair",
+        30..=49 => "Strained",
+        _ => "Critical",
+    }
+}
+
+pub fn format_unix_time(ts: i64) -> String {
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|dt| dt.with_timezone(&chrono::Local).format("%b %d · %H:%M:%S").to_string())
+        .unwrap_or_else(|| "—".to_string())
+}
+
 pub fn screen_kicker(screen: Screen) -> &'static str {
     match screen {
         Screen::Care => "Made for you",
-        Screen::Cleanup | Screen::Clutter | Screen::Space | Screen::Cloud => "Library",
-        Screen::Apps | Screen::Performance => "Your Mac",
+        Screen::Cleanup
+        | Screen::Clutter
+        | Screen::Space
+        | Screen::Cloud
+        | Screen::Duplicates
+        | Screen::Snapshots => "Library",
+        Screen::Apps | Screen::Performance | Screen::Assistant => "Your Mac",
         Screen::Protection | Screen::Malware => "Safety",
-        Screen::Assistant => "Now playing",
     }
 }

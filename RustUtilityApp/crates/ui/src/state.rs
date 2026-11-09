@@ -4,8 +4,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use engine::{
-    folder_access, AccessStatus, CareReport, CloudFolder, Detection, InstalledApp, JunkRoot,
-    LargeFile, LaunchAgent, LeftoverHit, MachineSample, SpaceReport, SpaceVolumeScan, ThreatReport,
+    folder_access, AccessStatus, CareReport, CloudFolder, Detection, DuplicateReport, HostPoint,
+    InstalledApp, JunkRoot, LargeFile, LaunchAgent, LeftoverHit, MachineSample, MonitorAnalytics,
+    ProcessPoint, SnapshotReport, SpaceReport, SpaceVolumeScan, TelemetrySummary, ThreatReport,
     ExecutionControl,
 };
 
@@ -23,6 +24,8 @@ pub enum Screen {
     Space,
     Cloud,
     Assistant,
+    Duplicates,
+    Snapshots,
 }
 
 impl Screen {
@@ -37,7 +40,9 @@ impl Screen {
             Self::Clutter => "Big Downloads",
             Self::Space => "Space Lens",
             Self::Cloud => "Cloud Storage",
-            Self::Assistant => "Now Playing",
+            Self::Assistant => "System Monitor",
+            Self::Duplicates => "Duplicates",
+            Self::Snapshots => "Snapshots",
         }
     }
 
@@ -53,7 +58,9 @@ impl Screen {
             Self::Clutter => "Large files sitting in Downloads",
             Self::Space => "Visual map of what uses your disk",
             Self::Cloud => "Local iCloud and cloud folder sizes",
-            Self::Assistant => "Live CPU and memory readings",
+            Self::Assistant => "Live CPU, memory, and top processes",
+            Self::Duplicates => "Same-content files wasting disk space",
+            Self::Snapshots => "APFS and Time Machine local snapshots",
         }
     }
 
@@ -76,6 +83,8 @@ impl Screen {
             Self::Space => ICON_SPACE_LENS,
             Self::Cloud => ICON_CLOUD_STORAGE,
             Self::Assistant => ICON_NOW_PLAYING,
+            Self::Duplicates => ICON_DUPLICATES,
+            Self::Snapshots => ICON_SNAPSHOTS,
         }
     }
 }
@@ -140,6 +149,8 @@ pub struct AppState {
     pub detections: Vec<Detection>,
     pub care: Option<CareReport>,
     pub junk: Vec<JunkRoot>,
+    pub dev_junk: Vec<JunkRoot>,
+    pub cleanup_tab: usize,
     pub agents: Vec<LaunchAgent>,
     pub apps: Vec<InstalledApp>,
     pub app_filter: String,
@@ -156,6 +167,9 @@ pub struct AppState {
     pub threat: Option<ThreatReport>,
     pub clutter: Vec<LargeFile>,
     pub cloud: Vec<CloudFolder>,
+    pub duplicates_root: String,
+    pub duplicates: Option<DuplicateReport>,
+    pub snapshots: Option<SnapshotReport>,
     pub access: AccessStatus,
     pub control: Option<Arc<ExecutionControl>>,
     pub busy: bool,
@@ -173,6 +187,21 @@ pub struct AppState {
     pub clutter_tab: usize,
     pub clutter_filter: String,
     pub auto_poll_monitor: bool,
+    pub monitor_sampling: bool,
+    pub monitor_analytics_loading: bool,
+    pub monitor_log_enabled: bool,
+    pub monitor_tab: usize,
+    pub monitor_range_hours: u32,
+    pub monitor_history: Vec<HostPoint>,
+    pub monitor_selected_host_id: Option<i64>,
+    pub monitor_selected_processes: Vec<ProcessPoint>,
+    pub monitor_process_focus: Option<String>,
+    pub monitor_process_series: Vec<ProcessPoint>,
+    pub monitor_summary: Option<TelemetrySummary>,
+    pub monitor_analytics: Option<MonitorAnalytics>,
+    pub monitor_spark_cpu: Vec<f32>,
+    pub monitor_spark_mem: Vec<f32>,
+    pub monitor_spark_swap: Vec<f32>,
     #[allow(dead_code)]
     pub malware_show_skipped: bool,
     pub space_progress_bytes: u64,
@@ -188,6 +217,7 @@ impl AppState {
             .unwrap_or_else(|_| PathBuf::from("/tmp"));
         let threat_root = home.join("Downloads").display().to_string();
         let space_root = home.display().to_string();
+        let duplicates_root = space_root.clone();
         let access = folder_access(std::path::Path::new("/Library/Application Support"));
         Self {
             screen: Screen::Care,
@@ -208,6 +238,8 @@ impl AppState {
             detections: Vec::new(),
             care: None,
             junk: Vec::new(),
+            dev_junk: Vec::new(),
+            cleanup_tab: 0,
             agents: Vec::new(),
             apps: Vec::new(),
             app_filter: String::new(),
@@ -225,6 +257,9 @@ impl AppState {
             threat: None,
             clutter: Vec::new(),
             cloud: Vec::new(),
+            duplicates_root,
+            duplicates: None,
+            snapshots: None,
             access,
             control: None,
             busy: false,
@@ -246,6 +281,21 @@ impl AppState {
             clutter_tab: 0,
             clutter_filter: String::new(),
             auto_poll_monitor: true,
+            monitor_sampling: false,
+            monitor_analytics_loading: false,
+            monitor_log_enabled: false,
+            monitor_tab: 0,
+            monitor_range_hours: 6,
+            monitor_history: Vec::new(),
+            monitor_selected_host_id: None,
+            monitor_selected_processes: Vec::new(),
+            monitor_process_focus: None,
+            monitor_process_series: Vec::new(),
+            monitor_summary: None,
+            monitor_analytics: None,
+            monitor_spark_cpu: Vec::new(),
+            monitor_spark_mem: Vec::new(),
+            monitor_spark_swap: Vec::new(),
             malware_show_skipped: false,
             space_progress_bytes: 0,
             space_progress_total_bytes: 0,
@@ -292,6 +342,8 @@ pub fn rail_groups() -> [(&'static str, &'static [Screen]); 4] {
                 Screen::Clutter,
                 Screen::Space,
                 Screen::Cloud,
+                Screen::Duplicates,
+                Screen::Snapshots,
             ],
         ),
         (

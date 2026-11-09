@@ -11,21 +11,27 @@ mod cloud;
 mod clutter;
 mod control;
 mod detect;
+mod duplicates;
 mod enumerate;
 mod error;
 mod event;
+mod hash;
 mod performance;
 mod remove;
 mod scan;
+mod snapshots;
 mod space;
+mod telemetry;
 mod threats;
 
 pub use access::{folder_access, AccessStatus};
 pub use apps::{installed_apps, survey_leftovers, InstalledApp, LeftoverHit};
 pub use care::{run_care, CareReport, CareState, ModuleResult};
 pub use cleanup::{
-    directory_size, junk_candidates, junk_roots, move_download_to_trash, move_root_to_trash, JunkRoot,
+    dev_junk_roots, directory_size, general_junk_candidates, junk_candidates, junk_roots,
+    move_download_to_trash, move_root_to_trash, JunkRoot,
 };
+pub use duplicates::{find_duplicates, DuplicateGroup, DuplicateReport};
 pub use cloud::{local_cloud_folders, CloudFolder};
 pub use clutter::{large_downloads, LargeFile};
 pub use control::ExecutionControl;
@@ -35,7 +41,12 @@ pub use error::ScanError;
 pub use event::{Detection, ScanEvent};
 pub use performance::{
     flush_dns_cache, launch_agents, machine_sample, reindex_spotlight, spotlight_status, LaunchAgent,
-    MachineSample,
+    MachineSample, ProcessSnap, VolumeBytes,
+};
+pub use snapshots::{list_local_snapshots, LocalSnapshot, SnapshotReport};
+pub use telemetry::{
+    HostPoint, MonitorAnalytics, MonitorBucket, ProcessAggregate, ProcessPoint, TelemetryStore,
+    TelemetrySummary,
 };
 pub use remove::{RemovalPlan, RemoveTask};
 pub use scan::{run_scan, ScanConfig};

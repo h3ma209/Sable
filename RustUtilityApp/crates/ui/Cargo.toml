@@ -1,6 +1,6 @@
 [package]
 name = "sable"
-version = "0.3.7"
+version = "0.3.8"
 edition = "2021"
 description = "Mac app for disk space, caches, and downloads you choose to trash"
 license = "MIT"
@@ -11,3 +11,5 @@ categories = ["gui"]
 dioxus = { version = "0.6", features = ["desktop"] }
 engine = { path = "../engine" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+image = { version = "0.25", default-features = false, features = ["png"] }

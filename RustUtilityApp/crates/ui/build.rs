@@ -61,6 +61,8 @@ fn main() {
     let icon_download = svg_data_url(&assets_dir.join("icons/download.svg"));
     let icon_house = svg_data_url(&assets_dir.join("icons/house.svg"));
     let icon_folder = svg_data_url(&assets_dir.join("icons/folder.svg"));
+    let icon_duplicates = svg_data_url(&assets_dir.join("sidebar/duplicates.svg"));
+    let icon_snapshots = svg_data_url(&assets_dir.join("sidebar/snapshots.svg"));
 
     let font_regular = font_data_url(&assets_dir.join("Sable-Regular.ttf"));
     let font_semibold = font_data_url(&assets_dir.join("Sable-SemiBold.ttf"));
@@ -87,6 +89,8 @@ pub const ICON_NOW_PLAYING: &str = "{icon_now_playing}";
 pub const ICON_DOWNLOAD: &str = "{icon_download}";
 pub const ICON_HOUSE: &str = "{icon_house}";
 pub const ICON_FOLDER: &str = "{icon_folder}";
+pub const ICON_DUPLICATES: &str = "{icon_duplicates}";
+pub const ICON_SNAPSHOTS: &str = "{icon_snapshots}";
 pub const DEFAULT_APP_ICON: &str = "{icon_apps}";
 
 pub const STYLESHEET: &str = {css_inlined:?};

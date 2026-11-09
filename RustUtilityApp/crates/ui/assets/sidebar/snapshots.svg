@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 100 100" role="img" aria-label="Snapshots glass icon">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f5c66a" stop-opacity=".62"/>
+      <stop offset=".48" stop-color="#b87318" stop-opacity=".43"/>
+      <stop offset="1" stop-color="#f5c66a" stop-opacity=".62"/>
+    </linearGradient>
+    <linearGradient id="glyph" x1="0" y1="0" x2=".2" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#fff4d9"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".48"/>
+      <stop offset=".42" stop-color="#ffffff" stop-opacity=".08"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3" result="blur"/>
+      <feOffset dy="3" result="offset"/>
+      <feComponentTransfer><feFuncA type="linear" slope=".32"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="clip"><rect x="5" y="5" width="90" height="90" rx="22"/></clipPath>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="5" y="5" width="90" height="90" rx="22" fill="url(#tile)" stroke="#fff3dc" stroke-opacity=".78" stroke-width="1.8"/>
+    <g clip-path="url(#clip)">
+      <path d="M2 29 Q26 1 59 4 Q82 6 99 25 V5 H5 Z" fill="url(#shine)"/>
+      <path d="M7 28 Q32 5 61 9" fill="none" stroke="#ffffff" stroke-opacity=".58" stroke-width="1.5" stroke-linecap="round"/>
+      <circle cx="83" cy="82" r="28" fill="#f5c66a" opacity=".13"/>
+    </g>
+    <path d="M22 62 L50 72 L78 62 V46 Q50 56 22 46 Z" fill="url(#glyph)" stroke="#fff4dc" stroke-width="2" stroke-linejoin="round" opacity=".72"/>
+    <path d="M26 50 L50 59 L74 50 V36 Q50 45 26 36 Z" fill="url(#glyph)" stroke="#fff4dc" stroke-width="2" stroke-linejoin="round" opacity=".86"/>
+    <path d="M30 38 L50 46 L70 38 V26 Q50 34 30 26 Z" fill="url(#glyph)" stroke="#fff8ea" stroke-width="2.5" stroke-linejoin="round"/>
+  </g>
+</svg>

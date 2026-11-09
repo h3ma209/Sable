@@ -4,12 +4,13 @@ use std::sync::Arc;
 
 use dioxus::prelude::*;
 use engine::{
-    flush_dns_cache, folder_access, junk_roots, large_downloads, launch_agents, local_cloud_folders,
-    machine_sample, move_download_to_trash, move_root_to_trash, prepare_and_scan, reindex_spotlight,
-    remember_ignore, run_care, run_scan, scan_space_volume_with_options, space_report_at, spotlight_status,
-    survey_leftovers, trash_selected, trash_threat as engine_trash_threat, volume_contains,
-    computer_root, AccessStatus,
-    ExecutionControl, ExtensionWatchDetector, MachineSample, ScanConfig, ScanEvent, SpaceProgress, SpaceReport,
+    dev_junk_roots, find_duplicates, flush_dns_cache, folder_access, junk_roots, large_downloads,
+    launch_agents, list_local_snapshots, local_cloud_folders, machine_sample, move_download_to_trash,
+    move_root_to_trash, prepare_and_scan, reindex_spotlight, remember_ignore, run_care, run_scan,
+    scan_space_volume_with_options, space_report_at, spotlight_status, survey_leftovers, trash_selected,
+    trash_threat as engine_trash_threat, volume_contains, computer_root, AccessStatus, ExecutionControl,
+    MonitorAnalytics, TelemetryStore, VolumeBytes,
+    ExtensionWatchDetector, MachineSample, ScanConfig, ScanEvent, SpaceProgress, SpaceReport,
 };
 use tokio::sync::mpsc;
 
@@ -29,8 +30,13 @@ pub fn load(mut state: Signal<AppState>, screen: Screen) {
         Screen::Performance => load_agents(state),
         Screen::Clutter => start_clutter(state),
         Screen::Cloud => start_cloud(state),
-        Screen::Assistant => sample_machine(state),
+        Screen::Assistant => {
+            refresh_monitor_meta(state);
+            sample_machine(state);
+        }
         Screen::Protection | Screen::Malware | Screen::Space => {}
+        Screen::Duplicates => start_duplicates(state),
+        Screen::Snapshots => start_snapshots(state),
     }
 }
 
@@ -168,10 +174,44 @@ pub fn start_junk(mut state: Signal<AppState>) {
     arm(&mut state.write());
     state.write().status = "scanning";
     spawn(async move {
-        let roots = tokio::task::spawn_blocking(move || junk_roots(&home))
+        let (general, dev) = tokio::task::spawn_blocking(move || {
+            (junk_roots(&home), dev_junk_roots(&home))
+        })
+        .await
+        .unwrap_or_default();
+        state.write().junk = general;
+        state.write().dev_junk = dev;
+        finish_and_pump(state);
+    });
+}
+
+pub fn start_duplicates(mut state: Signal<AppState>) {
+    if state.read().busy {
+        return;
+    }
+    let root = PathBuf::from(normalize_space_path(&state.read().duplicates_root));
+    arm(&mut state.write());
+    state.write().status = "scanning";
+    spawn(async move {
+        let report = tokio::task::spawn_blocking(move || find_duplicates(&root))
             .await
             .unwrap_or_default();
-        state.write().junk = roots;
+        state.write().duplicates = Some(report);
+        finish_and_pump(state);
+    });
+}
+
+pub fn start_snapshots(mut state: Signal<AppState>) {
+    if state.read().busy {
+        return;
+    }
+    arm(&mut state.write());
+    state.write().status = "scanning";
+    spawn(async move {
+        let report = tokio::task::spawn_blocking(|| list_local_snapshots(Path::new("/")))
+            .await
+            .unwrap_or_default();
+        state.write().snapshots = Some(report);
         finish_and_pump(state);
     });
 }
@@ -331,19 +371,281 @@ pub fn sample_machine(mut state: Signal<AppState>) {
     if state.read().busy {
         return;
     }
-    arm(&mut state.write());
-    state.write().status = "scanning";
+    {
+        let mut w = state.write();
+        if w.monitor_sampling {
+            return;
+        }
+        w.monitor_sampling = true;
+    }
+    let log_enabled = state.read().monitor_log_enabled;
+    let home = state.read().home.clone();
     spawn(async move {
         let sample = tokio::task::spawn_blocking(machine_sample)
             .await
-            .unwrap_or(MachineSample {
+            .unwrap_or_else(|_| MachineSample {
                 used_memory: 0,
                 total_memory: 0,
+                available_memory: 0,
                 cpu_percent: 0.0,
+                swap_used: 0,
+                swap_total: 0,
+                process_count: 0,
+                uptime_secs: 0,
+                load_avg_1m: 0.0,
+                load_avg_5m: 0.0,
+                load_avg_15m: 0.0,
+                boot_volume: VolumeBytes { total: 0, free: 0 },
+                top_cpu: Vec::new(),
+                top_mem: Vec::new(),
             });
-        state.write().sample = Some(sample);
+        {
+            let mut w = state.write();
+            let mem_pct = if sample.total_memory > 0 {
+                sample.used_memory as f32 / sample.total_memory as f32
+            } else {
+                0.0
+            };
+            let swap_pct = if sample.swap_total > 0 {
+                sample.swap_used as f32 / sample.swap_total as f32
+            } else {
+                0.0
+            };
+            crate::util::push_monitor_spark(&mut w.monitor_spark_cpu, sample.cpu_percent / 100.0);
+            crate::util::push_monitor_spark(&mut w.monitor_spark_mem, mem_pct);
+            crate::util::push_monitor_spark(&mut w.monitor_spark_swap, swap_pct);
+            w.sample = Some(sample.clone());
+            w.monitor_sampling = false;
+        }
+        if log_enabled {
+            let payload = sample;
+            let _ = tokio::task::spawn_blocking(move || {
+                TelemetryStore::open(&home).and_then(|store| {
+                    store.record(&payload).map(|_| ())
+                })
+            })
+            .await;
+            refresh_monitor_meta(state);
+        }
+    });
+}
+
+pub fn refresh_monitor_meta(mut state: Signal<AppState>) {
+    let home = state.read().home.clone();
+    spawn(async move {
+        let meta = tokio::task::spawn_blocking(move || {
+            let store = TelemetryStore::open(&home).ok()?;
+            Some((store.logging_enabled(), store.summary().ok()))
+        })
+        .await
+        .ok()
+        .flatten();
+        if let Some((enabled, summary)) = meta {
+            let mut w = state.write();
+            w.monitor_log_enabled = enabled;
+            if let Some(sum) = summary {
+                w.monitor_summary = Some(sum);
+            }
+        }
+    });
+}
+
+pub fn toggle_monitor_logging(mut state: Signal<AppState>) {
+    let home = state.read().home.clone();
+    let next = !state.read().monitor_log_enabled;
+    state.write().monitor_log_enabled = next;
+    spawn(async move {
+        let _ = tokio::task::spawn_blocking(move || {
+            TelemetryStore::open(&home).and_then(|s| s.set_logging_enabled(next))
+        })
+        .await;
+        refresh_monitor_meta(state);
+        if next {
+            state.write().notice = Some(Notice {
+                ok: true,
+                text: "History logging on — samples every 2s while Sable runs (SQLite in ~/Library/Application Support/Sable).".into(),
+                refresh: None,
+            });
+        }
+    });
+}
+
+pub fn load_monitor_analytics(mut state: Signal<AppState>) {
+    if state.read().monitor_analytics_loading {
+        return;
+    }
+    let home = state.read().home.clone();
+    let hours = state.read().monitor_range_hours;
+    let since = unix_now_secs() - (hours as i64) * 3600;
+    state.write().monitor_analytics_loading = true;
+    spawn(async move {
+        let bundle = tokio::task::spawn_blocking(
+            move || -> Result<(MonitorAnalytics, Vec<engine::HostPoint>), String> {
+                let store = TelemetryStore::open(&home)?;
+                let a = store.analytics(since)?;
+                let hist = store.host_history(since, 4_000)?;
+                Ok((a, hist))
+            },
+        )
+        .await;
+        let mut w = state.write();
+        w.monitor_analytics_loading = false;
+        match bundle {
+            Ok(Ok((analytics, hist))) => {
+                w.monitor_analytics = Some(analytics);
+                w.monitor_history = hist;
+            }
+            _ => {
+                w.monitor_analytics = Some(MonitorAnalytics::default());
+                w.notice = Some(Notice {
+                    ok: false,
+                    text: "Could not load monitor analytics.".into(),
+                    refresh: None,
+                });
+            }
+        }
+    });
+}
+
+pub fn export_monitor_csv(mut state: Signal<AppState>) {
+    let home = state.read().home.clone();
+    let hours = state.read().monitor_range_hours;
+    let since = unix_now_secs() - (hours as i64) * 3600;
+    spawn(async move {
+        let home_db = home.clone();
+        let csv = tokio::task::spawn_blocking(move || {
+            TelemetryStore::open(&home_db).and_then(|s| s.export_host_csv(since))
+        })
+        .await
+        .ok()
+        .and_then(|r| r.ok());
+        if let Some(text) = csv {
+            let path = home.join("Desktop").join(format!(
+                "sable-monitor-{}.csv",
+                unix_now_secs()
+            ));
+            match std::fs::write(&path, text) {
+                Ok(()) => {
+                    state.write().notice = Some(Notice {
+                        ok: true,
+                        text: format!(
+                            "Exported monitor CSV to {}",
+                            path.display()
+                        ),
+                        refresh: None,
+                    });
+                }
+                Err(err) => {
+                    state.write().notice = Some(Notice {
+                        ok: false,
+                        text: err.to_string(),
+                        refresh: None,
+                    });
+                }
+            }
+        }
+    });
+}
+
+pub fn load_monitor_history(mut state: Signal<AppState>) {
+    if state.read().busy {
+        return;
+    }
+    let home = state.read().home.clone();
+    let hours = state.read().monitor_range_hours;
+    let since = unix_now_secs() - (hours as i64) * 3600;
+    arm(&mut state.write());
+    state.write().status = "scanning";
+    spawn(async move {
+        let bundle = tokio::task::spawn_blocking(move || -> Result<(Vec<engine::HostPoint>, engine::TelemetrySummary), String> {
+            let store = TelemetryStore::open(&home)?;
+            let hist = store.host_history(since, 4_000)?;
+            let summary = store.summary()?;
+            Ok((hist, summary))
+        })
+        .await;
+        if let Ok(Ok((hist, summary))) = bundle {
+            let mut w = state.write();
+            w.monitor_history = hist;
+            w.monitor_summary = Some(summary);
+            w.monitor_selected_host_id = None;
+            w.monitor_selected_processes.clear();
+        }
         finish_and_pump(state);
     });
+}
+
+pub fn select_monitor_snapshot(mut state: Signal<AppState>, host_id: i64) {
+    let home = state.read().home.clone();
+    state.write().monitor_selected_host_id = Some(host_id);
+    spawn(async move {
+        let procs = tokio::task::spawn_blocking(move || {
+            TelemetryStore::open(&home).and_then(|s| s.processes_at(host_id))
+        })
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .unwrap_or_default();
+        state.write().monitor_selected_processes = procs;
+    });
+}
+
+pub fn focus_monitor_process(mut state: Signal<AppState>, name: String) {
+    let home = state.read().home.clone();
+    let hours = state.read().monitor_range_hours;
+    let since = unix_now_secs() - (hours as i64) * 3600;
+    state.write().monitor_process_focus = Some(name.clone());
+    spawn(async move {
+        let series = tokio::task::spawn_blocking(move || {
+            TelemetryStore::open(&home).and_then(|s| s.process_series(&name, since, 800))
+        })
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .unwrap_or_default();
+        state.write().monitor_process_series = series;
+    });
+}
+
+pub fn clear_monitor_history(mut state: Signal<AppState>) {
+    if state.read().busy {
+        return;
+    }
+    let home = state.read().home.clone();
+    arm(&mut state.write());
+    state.write().status = "cleaning";
+    spawn(async move {
+        let ok = tokio::task::spawn_blocking(move || {
+            TelemetryStore::open(&home).and_then(|s| s.clear_history().map(|_| true))
+        })
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .is_some();
+        state.write().monitor_history.clear();
+        state.write().monitor_selected_host_id = None;
+        state.write().monitor_selected_processes.clear();
+        state.write().monitor_process_series.clear();
+        state.write().monitor_process_focus = None;
+        refresh_monitor_meta(state);
+        state.write().notice = Some(Notice {
+            ok,
+            text: if ok {
+                "Monitor history cleared.".into()
+            } else {
+                "Could not clear history.".into()
+            },
+            refresh: None,
+        });
+        finish_and_pump(state);
+    });
+}
+
+fn unix_now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 pub fn survey_selected(mut state: Signal<AppState>) {

@@ -54,7 +54,18 @@ pub async fn run_care(home: PathBuf) -> CareReport {
     let sample = tokio::task::spawn_blocking(machine_sample).await.unwrap_or(crate::performance::MachineSample {
         used_memory: 0,
         total_memory: 0,
+        available_memory: 0,
         cpu_percent: 0.0,
+        swap_used: 0,
+        swap_total: 0,
+        process_count: 0,
+        uptime_secs: 0,
+        load_avg_1m: 0.0,
+        load_avg_5m: 0.0,
+        load_avg_15m: 0.0,
+        boot_volume: crate::performance::VolumeBytes { total: 0, free: 0 },
+        top_cpu: Vec::new(),
+        top_mem: Vec::new(),
     });
     let cache_bytes = junk.iter().fold(0u64, |sum, root| sum.saturating_add(root.bytes));
     let access = folder_access(Path::new("/Library/Application Support"));

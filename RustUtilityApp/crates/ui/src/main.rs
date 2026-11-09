@@ -3,20 +3,24 @@ pub mod assets;
 mod components;
 mod screens;
 mod state;
+mod tray;
 mod util;
 
-use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
+use dioxus::desktop::{use_wry_event_handler, Config, LogicalSize, WindowBuilder, WindowCloseBehaviour};
+use dioxus::desktop::tao::event::{Event, StartCause};
 use dioxus::prelude::*;
 
 use actions::ensure_auto_load;
 use components::{ConfirmModal, Sidebar};
 use screens::*;
 use state::{AppState, Screen};
+use tray::ensure_tray_icon;
 
 fn main() {
     LaunchBuilder::desktop()
         .with_cfg(
             Config::new()
+                .with_close_behaviour(WindowCloseBehaviour::LastWindowHides)
                 .with_custom_head(format!(
                     r#"<meta name="color-scheme" content="dark"><style>{}</style>"#,
                     assets::STYLESHEET
@@ -36,12 +40,35 @@ fn App() -> Element {
     let mut state = use_signal(AppState::new);
     let mut checked_updates = use_signal(|| false);
 
+    use_wry_event_handler(move |event, _| {
+        if let Event::NewEvents(StartCause::Init) = event {
+            ensure_tray_icon();
+        }
+    });
+
     use_effect(move || {
         if !*checked_updates.read() {
             checked_updates.set(true);
             actions::check_for_updates_on_startup(state);
         }
         ensure_auto_load(state);
+    });
+
+    use_future(move || async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+            let want_sample = {
+                let s = state.read();
+                (s.monitor_log_enabled
+                    || (s.screen == Screen::Assistant
+                        && s.auto_poll_monitor
+                        && s.monitor_tab == 0))
+                    && !s.busy
+            };
+            if want_sample {
+                actions::sample_machine(state);
+            }
+        }
     });
 
     let screen = state.read().screen;
@@ -98,6 +125,8 @@ fn App() -> Element {
                             Screen::Clutter => rsx! { ClutterScreen { state } },
                             Screen::Space => rsx! { SpaceScreen { state } },
                             Screen::Cloud => rsx! { CloudScreen { state } },
+                            Screen::Duplicates => rsx! { DuplicatesScreen { state } },
+                            Screen::Snapshots => rsx! { SnapshotsScreen { state } },
                             Screen::Assistant => rsx! { AssistantScreen { state } },
                         }
                     }
