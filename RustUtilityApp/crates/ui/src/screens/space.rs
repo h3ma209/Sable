@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use dioxus::prelude::*;
-use engine::computer_root;
+use engine::{computer_root, effective_shallow_dir_names, parse_shallow_dir_names, shallow_dir_name_match};
 
 use crate::actions::{space_back, space_forward, space_open, start_space, stop_space};
 use crate::assets::{ICON_FOLDER, ICON_HOUSE};
@@ -19,6 +19,8 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
     let can_forward = !state.read().space_future.is_empty();
     let filter = state.read().space_filter.clone();
     let space_exclude_dirs = state.read().space_exclude_dirs.clone();
+    let shallow_names =
+        effective_shallow_dir_names(&parse_shallow_dir_names(&space_exclude_dirs));
     let sort_mode = state.read().space_sort;
 
     let done_bytes = state.read().space_progress_bytes;
@@ -123,7 +125,7 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
                     class: "field",
                     style: "max-width: 250px; font-size: 11px;",
                     placeholder: "Exclude (size only): node_modules…",
-                    title: "Folders to measure by size without diving into internal files (comma separated)",
+                    title: "Folder names (basename match). Rescan after editing. Size counted, no map or drill-in.",
                     value: "{space_exclude_dirs}",
                     disabled: busy,
                     oninput: move |e| state.write().space_exclude_dirs = e.value(),
@@ -244,16 +246,19 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
                                 let name = file_name(&child.path);
                                 let (cat_color, cat_label) = space_category_style(is_dir, &name);
                                 let is_dev = is_dev_artifact(&name);
+                                let size_only = child.size_only
+                                    || (is_dir && shallow_dir_name_match(&name, &shallow_names));
+                                let can_drill = is_dir && !size_only;
 
                                 rsx! {
                                     div { class: "row", style: "align-items: center;",
                                         div {
                                             class: "row-body",
-                                            style: "cursor: pointer;",
+                                            style: if can_drill || !is_dir { "cursor: pointer;" } else { "cursor: default;" },
                                             onclick: move |_| {
-                                                if is_dir {
+                                                if can_drill {
                                                     space_open(state, path_open.clone());
-                                                } else {
+                                                } else if !is_dir {
                                                     reveal(&path_open);
                                                 }
                                             },
@@ -297,7 +302,13 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
                                                         "DEV ARTIFACT"
                                                     }
                                                 }
-                                                if is_dir {
+                                                if size_only {
+                                                    span {
+                                                        style: "font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 3px; background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.35);",
+                                                        "SIZE ONLY"
+                                                    }
+                                                }
+                                                if can_drill {
                                                     span { style: "opacity: 0.4; font-size: 11px; margin-left: auto;", "Drill in ›" }
                                                 }
                                             }

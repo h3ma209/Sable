@@ -2,8 +2,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::hash::sha256_file;
+use crate::space::shallow_dir_basename_match;
 
-const MAX_FILES: usize = 25_000;
+/// Only skip dependency/cache trees — unlike Space Lens we still walk build/, vendor/, Library/, etc.
+const DUPLICATE_SKIP_DIR_NAMES: &[&str] = &["node_modules", ".git", "target", ".gradle", ".npm", ".pnpm-store"];
+
+const MAX_FILES: usize = 120_000;
+const MAX_DUPLICATE_GROUPS: usize = 150;
 const MIN_BYTES: u64 = 64 * 1024;
 const MAX_HASH_BYTES: u64 = 512 * 1024 * 1024;
 
@@ -22,51 +27,85 @@ pub struct DuplicateReport {
     pub hashed: u64,
     pub skipped_dirs: u64,
     pub wasted_bytes: u64,
+    /// Hit file scan cap before finishing the tree — narrow the folder or rescan after cleanup.
+    pub cap_hit: bool,
 }
 
-/// Size-bucket then SHA-256. Skips symlinks and tiny files.
+/// Expand `~`, then canonicalize when possible so scans always walk the full directory tree.
+pub fn resolve_duplicate_scan_root(input: &str) -> PathBuf {
+    let trimmed = input.trim();
+    let expanded = if trimmed == "~" {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(trimmed))
+    } else if let Some(rest) = trimmed.strip_prefix("~/") {
+        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        home.join(rest)
+    } else {
+        PathBuf::from(trimmed)
+    };
+    std::fs::canonicalize(&expanded).unwrap_or(expanded)
+}
+
+fn duplicate_skip_dir_names() -> Vec<String> {
+    DUPLICATE_SKIP_DIR_NAMES
+        .iter()
+        .map(|s| s.to_ascii_lowercase())
+        .collect()
+}
+
+fn should_skip_dir(path: &Path) -> bool {
+    shallow_dir_basename_match(path, &duplicate_skip_dir_names())
+}
+
+/// Recursively finds duplicate files under `root` (all descendants, not only the top level).
 pub fn find_duplicates(root: &Path) -> DuplicateReport {
+    let root = if root.as_os_str().is_empty() {
+        root.to_path_buf()
+    } else {
+        std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf())
+    };
     let mut report = DuplicateReport {
-        root: root.to_path_buf(),
+        root: root.clone(),
         ..Default::default()
     };
     if !root.is_dir() {
         return report;
     }
-    let default_skip = [
-        "node_modules",
-        ".git",
-        "target",
-        ".gradle",
-        ".npm",
-        "Library/Caches",
-    ];
     let mut by_size: HashMap<u64, Vec<PathBuf>> = HashMap::new();
-    let mut stack = vec![root.to_path_buf()];
+    let mut stack = vec![root.clone()];
     while let Some(dir) = stack.pop() {
+        if report.scanned as usize >= MAX_FILES {
+            report.cap_hit = true;
+            break;
+        }
         let entries = match std::fs::read_dir(&dir) {
             Ok(entries) => entries,
             Err(_) => continue,
         };
         for entry in entries.flatten() {
             if report.scanned as usize >= MAX_FILES {
+                report.cap_hit = true;
+                stack.clear();
                 break;
             }
             let path = entry.path();
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if path.is_dir() {
-                if default_skip.iter().any(|s| name == *s || path.to_string_lossy().contains(s)) {
+            let meta = match std::fs::symlink_metadata(&path) {
+                Ok(meta) => meta,
+                Err(_) => continue,
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            if meta.is_dir() {
+                if should_skip_dir(&path) {
                     report.skipped_dirs += 1;
                     continue;
                 }
                 stack.push(path);
                 continue;
             }
-            let meta = match std::fs::symlink_metadata(&path) {
-                Ok(meta) => meta,
-                Err(_) => continue,
-            };
-            if meta.file_type().is_symlink() || !meta.is_file() {
+            if !meta.is_file() {
                 continue;
             }
             let size = meta.len();
@@ -115,7 +154,7 @@ pub fn find_duplicates(root: &Path) -> DuplicateReport {
         let wb = b.bytes.saturating_mul(b.paths.len() as u64);
         wb.cmp(&wa)
     });
-    report.groups.truncate(80);
+    report.groups.truncate(MAX_DUPLICATE_GROUPS);
     report
 }
 
@@ -136,5 +175,43 @@ mod tests {
         assert_eq!(report.groups.len(), 1);
         assert_eq!(report.groups[0].paths.len(), 2);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scans_inside_build_not_space_shallow_skip() {
+        let dir = std::env::temp_dir().join(format!("sable_dup_build_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("build/release")).unwrap();
+        let payload = vec![b'z'; 75_000];
+        fs::write(dir.join("build/release/a.bin"), &payload).unwrap();
+        fs::write(dir.join("build/release/b.bin"), &payload).unwrap();
+        let report = find_duplicates(&dir);
+        assert_eq!(report.groups.len(), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn finds_duplicates_in_nested_subfolders() {
+        let dir = std::env::temp_dir().join(format!("sable_dup_nested_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("Desktop")).unwrap();
+        fs::create_dir_all(dir.join("Documents/deep")).unwrap();
+        let payload = vec![b'y'; 80_000];
+        fs::write(dir.join("Desktop/one.bin"), &payload).unwrap();
+        fs::write(dir.join("Documents/deep/two.bin"), &payload).unwrap();
+        let report = find_duplicates(&dir);
+        assert_eq!(report.groups.len(), 1, "expected dup across nested paths");
+        assert_eq!(report.groups[0].paths.len(), 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_tilde_home_root() {
+        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        if home.as_os_str().is_empty() {
+            return;
+        }
+        let resolved = resolve_duplicate_scan_root("~");
+        assert_eq!(resolved, std::fs::canonicalize(&home).unwrap_or(home));
     }
 }

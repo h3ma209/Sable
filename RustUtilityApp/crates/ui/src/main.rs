@@ -99,8 +99,10 @@ fn App() -> Element {
                         _ => None,
                     };
                     if let Some(scr) = target {
-                        state.write().go(scr);
-                        actions::load(state, scr);
+                        state.write().try_go(scr);
+                        if state.read().screen == scr && !state.read().navigation_locked() {
+                            actions::load(state, scr);
+                        }
                     }
                 }
             },

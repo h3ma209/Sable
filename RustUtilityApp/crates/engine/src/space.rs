@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::os::darwin::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-
-use rayon::prelude::*;
 
 use crate::access::{folder_access, AccessStatus};
 use crate::cleanup::finder_trash;
@@ -32,10 +31,42 @@ struct PathFilter {
     reminders_path: Option<PathBuf>,
 }
 
+/// Only one blocking scan at a time — avoids several full trees in RAM when rescanning quickly.
+static SPACE_SCAN_SERIAL: Mutex<()> = Mutex::new(());
+
+/// Stop mapping individual children deeper than this (folder still gets total size via fast_dir_sum).
+const SPACE_MAP_MAX_DEPTH: usize = 28;
+/// Cap mapped directory nodes so home / “This Mac” scans stay bounded in memory.
+const SPACE_MAP_MAX_DIRECTORY_NODES: usize = 80_000;
+
+/// Always size-only — never map individual children (merged with the UI exclude field).
+pub const DEFAULT_SPACE_SHALLOW_DIR_NAMES: &[&str] = &[
+    "node_modules",
+    ".git",
+    "target",
+    "build",
+    ".gradle",
+    ".npm",
+    "npm",
+    ".next",
+    ".turbo",
+    "Pods",
+    "DerivedData",
+    ".venv",
+    "venv",
+    "vendor",
+    ".cargo",
+    ".pnpm-store",
+    ".m2",
+    ".rustup",
+    ".docker",
+];
+
 struct ScanTask {
     filter: PathFilter,
     strategy: CloudScannerStrategy,
     shallow_dirs: Vec<String>,
+    mapped_dirs: Arc<AtomicUsize>,
 }
 
 /// Full tree node. Sable keeps one `rootNode` on the representation view model
@@ -45,6 +76,8 @@ pub struct SpaceEntity {
     pub path: PathBuf,
     pub bytes: u64,
     pub is_directory: bool,
+    /// Measured as one blob; scanner did not map children (excluded folder names).
+    pub size_only: bool,
     pub is_purgeable: bool,
     pub cloud: CloudStatus,
     pub leaves: u64,
@@ -67,6 +100,7 @@ pub struct SpaceNode {
     pub path: PathBuf,
     pub bytes: u64,
     pub is_directory: bool,
+    pub size_only: bool,
     pub is_purgeable: bool,
     pub cloud: CloudStatus,
     pub leaves: u64,
@@ -226,6 +260,7 @@ pub async fn scan_space_volume_with_options(
 ) -> SpaceVolumeScan {
     let scan_root = PathBuf::from(normalize_space_path(&scan_root.display().to_string()));
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let shallow_dirs = effective_shallow_dir_names(&shallow_dirs);
     let task = Arc::new(create_scan_task(&home, shallow_dirs));
     let root_dev = std::fs::symlink_metadata(&scan_root).map(|meta| meta.st_dev()).unwrap_or(0);
     let seen = Arc::new(Mutex::new(HashSet::new()));
@@ -234,6 +269,27 @@ pub async fn scan_space_volume_with_options(
     let seen_bg = Arc::clone(&seen);
     let home_clone = home.clone();
     let root = tokio::task::spawn_blocking(move || {
+        let _scan_serial = match SPACE_SCAN_SERIAL.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if control
+            .as_ref()
+            .map(|c| c.is_canceled())
+            .unwrap_or(false)
+        {
+            return SpaceEntity {
+                path: scan_for_task.clone(),
+                bytes: 0,
+                is_directory: true,
+                size_only: false,
+                is_purgeable: false,
+                cloud: CloudStatus::NotCloud,
+                leaves: 0,
+                modified: None,
+                children: Vec::new(),
+            };
+        }
         let vol_used = volume_used_bytes(&scan_for_task).unwrap_or(250 * 1024 * 1024 * 1024);
         let initial_total = if scan_for_task == Path::new("/") || scan_for_task == computer_root() {
             vol_used
@@ -243,13 +299,28 @@ pub async fn scan_space_volume_with_options(
             vol_used / 3
         };
         let tracker = Arc::new(ProgressTracker::new(control, progress_tx, initial_total));
-        build_root_entity(scan_for_task, root_dev, &task_bg, seen_bg, &tracker)
+        let built = build_root_entity(scan_for_task.clone(), root_dev, &task_bg, seen_bg, &tracker);
+        if tracker.is_canceled() {
+            return SpaceEntity {
+                path: scan_for_task,
+                bytes: 0,
+                is_directory: true,
+                size_only: false,
+                is_purgeable: false,
+                cloud: CloudStatus::NotCloud,
+                leaves: 0,
+                modified: None,
+                children: Vec::new(),
+            };
+        }
+        built
     })
     .await
     .unwrap_or_else(|_| SpaceEntity {
         path: scan_root.clone(),
         bytes: 0,
         is_directory: true,
+        size_only: false,
         is_purgeable: false,
         cloud: CloudStatus::NotCloud,
         leaves: 0,
@@ -335,30 +406,115 @@ fn create_scan_task(home: &Path, shallow_dirs: Vec<String>) -> ScanTask {
         },
         strategy: CloudScannerStrategy::UrlUbiquitousKeys,
         shallow_dirs,
+        mapped_dirs: Arc::new(AtomicUsize::new(0)),
     }
+}
+
+fn map_budget_exhausted(task: &ScanTask) -> bool {
+    task.mapped_dirs.load(Ordering::Relaxed) >= SPACE_MAP_MAX_DIRECTORY_NODES
+}
+
+fn note_mapped_directory(task: &ScanTask) -> bool {
+    let n = task.mapped_dirs.fetch_add(1, Ordering::Relaxed);
+    n < SPACE_MAP_MAX_DIRECTORY_NODES
+}
+
+/// Comma-separated folder basenames from Space Lens ("node_modules, .gradle, …").
+pub fn parse_shallow_dir_names(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|s| s.trim().trim_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+pub fn effective_shallow_dir_names(user: &[String]) -> Vec<String> {
+    let mut names: HashSet<String> = DEFAULT_SPACE_SHALLOW_DIR_NAMES
+        .iter()
+        .map(|s| s.to_ascii_lowercase())
+        .collect();
+    for entry in user {
+        let clean = entry.trim().trim_matches('/').to_ascii_lowercase();
+        if !clean.is_empty() {
+            names.insert(clean);
+        }
+    }
+    names.into_iter().collect()
+}
+
+/// True when this directory's final name is in the exclude list (basename match only).
+pub fn shallow_dir_basename_match(path: &Path, shallow_dirs: &[String]) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let name_lower = name.to_ascii_lowercase();
+    shallow_dirs.iter().any(|sh| {
+        let clean = sh.trim().trim_matches('/').to_ascii_lowercase();
+        !clean.is_empty() && name_lower == clean
+    })
+}
+
+pub fn shallow_dir_name_match(name: &str, shallow_dirs: &[String]) -> bool {
+    let name_lower = name.to_ascii_lowercase();
+    shallow_dirs.iter().any(|sh| {
+        let clean = sh.trim().trim_matches('/').to_ascii_lowercase();
+        !clean.is_empty() && name_lower == clean
+    })
+}
+
+pub fn space_entry_size_only(volume: &SpaceVolumeScan, folder: &Path) -> bool {
+    find_entity_in_volume(volume, folder)
+        .map(|e| e.size_only)
+        .unwrap_or(false)
 }
 
 fn is_shallow_dir(task: &ScanTask, path: &Path) -> bool {
-    if task.shallow_dirs.is_empty() {
-        return false;
-    }
-    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-        let name_lower = name.to_ascii_lowercase();
-        task.shallow_dirs.iter().any(|sh| {
-            let clean = sh.trim().trim_matches('/').to_ascii_lowercase();
-            !clean.is_empty() && (name_lower == clean || name_lower.contains(&clean))
-        })
-    } else {
-        false
-    }
+    shallow_dir_basename_match(path, &task.shallow_dirs)
 }
 
-fn fast_dir_sum(dir: &Path, tracker: &ProgressTracker) -> (u64, u64) {
+/// Total size without listing or mapping inner paths (single progress tick per excluded folder).
+fn opaque_dir_sum(dir: &Path, tracker: &ProgressTracker, task: &ScanTask) -> (u64, u64) {
+    tracker.record_item(0, dir);
+    if let Some(kb) = dir_disk_usage_kb(dir) {
+        return (kb.saturating_mul(1024), 0);
+    }
+    dir_sum_walk(dir, tracker, task, true)
+}
+
+#[cfg(unix)]
+fn dir_disk_usage_kb(dir: &Path) -> Option<u64> {
+    let output = Command::new("/usr/bin/du")
+        .arg("-sk")
+        .arg(dir)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let line = String::from_utf8_lossy(&output.stdout);
+    line.split_whitespace()
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+}
+
+#[cfg(not(unix))]
+fn dir_disk_usage_kb(_dir: &Path) -> Option<u64> {
+    None
+}
+
+fn dir_sum_walk(
+    dir: &Path,
+    tracker: &ProgressTracker,
+    task: &ScanTask,
+    silent: bool,
+) -> (u64, u64) {
     let mut bytes = 0u64;
     let mut leaves = 0u64;
     let mut stack = vec![dir.to_path_buf()];
     while let Some(current) = stack.pop() {
         if tracker.is_canceled() {
+            break;
+        }
+        if stack.len() > 4096 {
             break;
         }
         let entries = match std::fs::read_dir(&current) {
@@ -375,16 +531,34 @@ fn fast_dir_sum(dir: &Path, tracker: &ProgressTracker) -> (u64, u64) {
                 continue;
             }
             if meta.is_dir() {
-                stack.push(p);
+                if is_shallow_dir(task, &p) {
+                    let (nested_bytes, nested_leaves) = opaque_dir_sum(&p, tracker, task);
+                    bytes = bytes.saturating_add(nested_bytes);
+                    leaves = leaves.saturating_add(nested_leaves);
+                } else {
+                    stack.push(p);
+                }
             } else {
                 let file_bytes = allocated_bytes(&meta);
                 bytes = bytes.saturating_add(file_bytes);
                 leaves = leaves.saturating_add(1);
-                tracker.record_item(file_bytes, &p);
+                if !silent {
+                    tracker.record_item(file_bytes, &p);
+                }
             }
         }
     }
     (bytes, leaves)
+}
+
+fn fast_dir_sum(dir: &Path, tracker: &ProgressTracker, task: &ScanTask) -> (u64, u64) {
+    if is_shallow_dir(task, dir) {
+        return opaque_dir_sum(dir, tracker, task);
+    }
+    if !tracker.is_canceled() {
+        tracker.record_item(0, dir);
+    }
+    dir_sum_walk(dir, tracker, task, false)
 }
 
 fn build_root_entity(
@@ -411,6 +585,7 @@ fn build_root_entity(
         path: scan_root.clone(),
         bytes,
         is_directory: true,
+        size_only: false,
         is_purgeable: false,
         cloud: CloudStatus::NotCloud,
         leaves,
@@ -434,7 +609,7 @@ fn directory_entries(task: &ScanTask, directory: &Path) -> Vec<PathBuf> {
     }
 }
 
-/// Work-stealing parallel traversal via rayon for upper directory depths.
+/// Sequential child build — parallel rayon subtrees spiked RAM on wide folders (e.g. ~/Library).
 fn build_children(
     entries: Vec<PathBuf>,
     root_dev: u64,
@@ -446,29 +621,16 @@ fn build_children(
     if entries.is_empty() || tracker.is_canceled() {
         return Vec::new();
     }
-
-    if depth < 3 && entries.len() > 1 {
-        entries
-            .into_par_iter()
-            .filter_map(|path| {
-                if tracker.is_canceled() {
-                    return None;
-                }
-                build_entity(path, root_dev, task, seen, tracker, depth + 1)
-            })
-            .collect()
-    } else {
-        entries
-            .into_iter()
-            .take_while(|_| !tracker.is_canceled())
-            .filter_map(|path| {
-                if tracker.is_canceled() {
-                    return None;
-                }
-                build_entity(path, root_dev, task, seen, tracker, depth + 1)
-            })
-            .collect()
-    }
+    entries
+        .into_iter()
+        .take_while(|_| !tracker.is_canceled())
+        .filter_map(|path| {
+            if tracker.is_canceled() {
+                return None;
+            }
+            build_entity(path, root_dev, task, seen, tracker, depth + 1)
+        })
+        .collect()
 }
 
 fn build_entity(
@@ -506,6 +668,7 @@ fn build_entity(
             path,
             bytes: 0,
             is_directory,
+            size_only: false,
             is_purgeable: false,
             cloud,
             leaves: 0,
@@ -524,6 +687,7 @@ fn build_entity(
                     path,
                     bytes: 0,
                     is_directory: true,
+                    size_only: false,
                     is_purgeable: false,
                     cloud,
                     leaves: 0,
@@ -536,11 +700,44 @@ fn build_entity(
         // If directory matches exclusion list:
         // Record its total size but do not dive deeper into child trees.
         if is_shallow_dir(task, &path) {
-            let (bytes, leaves) = fast_dir_sum(&path, tracker);
+            let (bytes, leaves) = fast_dir_sum(&path, tracker, task);
             return Some(SpaceEntity {
                 path,
                 bytes,
                 is_directory: true,
+                size_only: true,
+                is_purgeable: false,
+                cloud,
+                leaves,
+                modified,
+                children: Vec::new(),
+            });
+        }
+
+        let collapse_depth = depth >= SPACE_MAP_MAX_DEPTH;
+        let collapse_budget = map_budget_exhausted(task);
+        if collapse_depth || collapse_budget {
+            let (bytes, leaves) = fast_dir_sum(&path, tracker, task);
+            return Some(SpaceEntity {
+                path,
+                bytes,
+                is_directory: true,
+                size_only: collapse_budget,
+                is_purgeable: false,
+                cloud,
+                leaves,
+                modified,
+                children: Vec::new(),
+            });
+        }
+
+        if !note_mapped_directory(task) {
+            let (bytes, leaves) = fast_dir_sum(&path, tracker, task);
+            return Some(SpaceEntity {
+                path,
+                bytes,
+                is_directory: true,
+                size_only: true,
                 is_purgeable: false,
                 cloud,
                 leaves,
@@ -558,6 +755,7 @@ fn build_entity(
             path,
             bytes,
             is_directory: true,
+            size_only: false,
             is_purgeable: false,
             cloud,
             leaves,
@@ -575,6 +773,7 @@ fn build_entity(
                 path,
                 bytes: 0,
                 is_directory: false,
+                size_only: false,
                 is_purgeable: false,
                 cloud,
                 leaves: 0,
@@ -590,6 +789,7 @@ fn build_entity(
         path,
         bytes,
         is_directory: false,
+        size_only: false,
         is_purgeable: false,
         cloud,
         leaves,
@@ -603,6 +803,7 @@ fn entity_to_node(entity: &SpaceEntity) -> SpaceNode {
         path: entity.path.clone(),
         bytes: entity.bytes,
         is_directory: entity.is_directory,
+        size_only: entity.size_only,
         is_purgeable: entity.is_purgeable,
         cloud: entity.cloud,
         leaves: entity.leaves,
@@ -650,48 +851,54 @@ fn path_aliases(path: &Path) -> Vec<PathBuf> {
     aliases
 }
 
+fn insert_lookup_aliases(
+    node: &SpaceEntity,
+    index: &[usize],
+    lookup: &mut HashMap<PathBuf, Vec<usize>>,
+    home: &Path,
+    data_home: &Path,
+    computer: &Path,
+) {
+    if !node.is_directory {
+        return;
+    }
+    let mut aliases = vec![node.path.clone()];
+    if !home.as_os_str().is_empty() {
+        if let Ok(rest) = node.path.strip_prefix(home) {
+            push_alias(&mut aliases, data_home.join(rest));
+        } else if let Ok(rest) = node.path.strip_prefix(data_home) {
+            push_alias(&mut aliases, home.join(rest));
+        }
+    }
+    if node.path == computer {
+        push_alias(&mut aliases, PathBuf::from("/"));
+    } else if node.path == Path::new("/") {
+        push_alias(&mut aliases, computer.to_path_buf());
+    } else if let Ok(rest) = node.path.strip_prefix(computer) {
+        push_alias(&mut aliases, Path::new("/").join(rest));
+    } else if let Ok(rest) = node.path.strip_prefix("/") {
+        push_alias(&mut aliases, computer.join(rest));
+    }
+    for alias in aliases {
+        lookup.entry(alias).or_insert_with(|| index.to_vec());
+    }
+}
+
+/// Iterative walk — deep home trees no longer risk stack overflow in lookup build.
 fn build_lookup(root: &SpaceEntity) -> HashMap<PathBuf, Vec<usize>> {
     let mut lookup = HashMap::new();
     let (home, data_home) = home_data_context();
     let computer = computer_root();
-    fn walk(
-        node: &SpaceEntity,
-        index: &[usize],
-        lookup: &mut HashMap<PathBuf, Vec<usize>>,
-        home: &Path,
-        data_home: &Path,
-        computer: &Path,
-    ) {
-        if node.is_directory {
-            let mut aliases = vec![node.path.clone()];
-            if !home.as_os_str().is_empty() {
-                if let Ok(rest) = node.path.strip_prefix(home) {
-                    push_alias(&mut aliases, data_home.join(rest));
-                } else if let Ok(rest) = node.path.strip_prefix(data_home) {
-                    push_alias(&mut aliases, home.join(rest));
-                }
-            }
-            if node.path == computer {
-                push_alias(&mut aliases, PathBuf::from("/"));
-            } else if node.path == Path::new("/") {
-                push_alias(&mut aliases, computer.to_path_buf());
-            } else if let Ok(rest) = node.path.strip_prefix(computer) {
-                push_alias(&mut aliases, Path::new("/").join(rest));
-            } else if let Ok(rest) = node.path.strip_prefix("/") {
-                push_alias(&mut aliases, computer.join(rest));
-            }
-            for alias in aliases {
-                lookup.entry(alias).or_insert_with(|| index.to_vec());
-            }
-        }
-        for (offset, child) in node.children.iter().enumerate() {
+    let mut stack: Vec<(&SpaceEntity, Vec<usize>)> = vec![(root, Vec::new())];
+    while let Some((node, index)) = stack.pop() {
+        insert_lookup_aliases(node, &index, &mut lookup, &home, &data_home, &computer);
+        for (offset, child) in node.children.iter().enumerate().rev() {
             let mut child_index = Vec::with_capacity(index.len() + 1);
-            child_index.extend_from_slice(index);
+            child_index.extend_from_slice(&index);
             child_index.push(offset);
-            walk(child, &child_index, lookup, home, data_home, computer);
+            stack.push((child, child_index));
         }
     }
-    walk(root, &[], &mut lookup, &home, &data_home, &computer);
     lookup
 }
 
@@ -878,6 +1085,7 @@ mod tests {
             path: data_home.join("Desktop"),
             bytes: 42,
             is_directory: true,
+            size_only: false,
             is_purgeable: false,
             cloud: CloudStatus::NotCloud,
             leaves: 1,
@@ -888,6 +1096,7 @@ mod tests {
             path: data_home.clone(),
             bytes: 42,
             is_directory: true,
+            size_only: false,
             is_purgeable: false,
             cloud: CloudStatus::NotCloud,
             leaves: 1,
@@ -916,6 +1125,7 @@ mod tests {
             path: dir.clone(),
             bytes: sub.bytes,
             is_directory: true,
+            size_only: false,
             is_purgeable: false,
             cloud: CloudStatus::NotCloud,
             leaves: sub.leaves,
@@ -1011,8 +1221,46 @@ mod tests {
 
         let nm_entity = volume.root.children.iter().find(|c| c.path.ends_with("node_modules")).expect("node_modules exists");
         assert!(nm_entity.bytes >= 8192, "node_modules should contain its full size");
+        assert!(nm_entity.size_only);
         assert!(nm_entity.children.is_empty(), "node_modules should NOT have children in tree");
+        assert!(
+            effective_shallow_dir_names(&[]).iter().any(|n| n == "node_modules"),
+            "defaults must always include node_modules"
+        );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lookup_builds_for_deep_chain_without_recursion() {
+        let mut path = PathBuf::from("/tmp/space_deep_chain");
+        let leaf_bytes = 4096u64;
+        let mut entity = SpaceEntity {
+            path: path.join("leaf"),
+            bytes: leaf_bytes,
+            is_directory: false,
+            size_only: false,
+            is_purgeable: false,
+            cloud: CloudStatus::NotCloud,
+            leaves: 1,
+            modified: None,
+            children: Vec::new(),
+        };
+        for i in (0..220).rev() {
+            path = path.join(format!("seg{i}"));
+            entity = SpaceEntity {
+                path: path.clone(),
+                bytes: entity.bytes,
+                is_directory: true,
+                size_only: false,
+                is_purgeable: false,
+                cloud: CloudStatus::NotCloud,
+                leaves: entity.leaves,
+                modified: None,
+                children: vec![entity],
+            };
+        }
+        let lookup = build_lookup(&entity);
+        assert!(lookup.contains_key(&path));
     }
 
     #[test]
@@ -1028,6 +1276,7 @@ mod tests {
             path: comp.clone(),
             bytes: 1000,
             is_directory: true,
+            size_only: false,
             is_purgeable: false,
             cloud: CloudStatus::NotCloud,
             leaves: 1,

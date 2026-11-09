@@ -170,6 +170,7 @@ fn CareTask(
     success: bool,
 ) -> Element {
     let picked = state.read().care_picks.contains(&screen);
+    let nav_locked = state.read().navigation_locked();
     let class = if selectable && picked {
         "card interactive task-card selectable selected glass"
     } else if selectable {
@@ -222,9 +223,11 @@ fn CareTask(
             div { class: "task-actions",
                 button {
                     class: "btn btn-ghost",
+                    disabled: nav_locked,
+                    title: if nav_locked { "Wait for the current task to finish" } else { "" },
                     onclick: move |e| {
                         e.stop_propagation();
-                        state.write().go(screen);
+                        state.write().try_go(screen);
                     },
                     "{action}"
                 }

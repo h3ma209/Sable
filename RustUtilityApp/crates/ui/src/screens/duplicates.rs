@@ -15,7 +15,7 @@ pub fn DuplicatesScreen(mut state: Signal<AppState>) -> Element {
     rsx! {
         PageHeader {
             screen: Screen::Duplicates,
-            subtitle: "Finds same-size files, then hashes them. Groups of 2+ identical files only (64KB+).",
+            subtitle: "Walks the full tree under your folder (build/, Documents/, Library/, …). Skips only node_modules, .git, target, Gradle/npm caches. 64KB+ files.",
             safety: Safety::ReadOnly,
             action_label: Some(if busy { "Scanning…".into() } else { "Scan".into() }),
             action_enabled: !busy,
@@ -38,6 +38,9 @@ pub fn DuplicatesScreen(mut state: Signal<AppState>) -> Element {
                 span { strong { "{report.groups.len()}" } " duplicate groups" }
                 span { strong { "{format_bytes(report.wasted_bytes)}" } " reclaimable (keep 1 copy each)" }
                 span { "{report.scanned} files scanned" }
+                if report.cap_hit {
+                    span { style: "color: var(--warn);", "Capped at 120k files — use a smaller folder or free space and rescan" }
+                }
             }
             if report.groups.is_empty() {
                 div { class: "card empty",
@@ -84,7 +87,7 @@ pub fn DuplicatesScreen(mut state: Signal<AppState>) -> Element {
         } else {
             div { class: "card empty",
                 h3 { "No scan yet" }
-                p { "Choose a folder (home is fine) and press Scan." }
+                p { "Set a parent path like /Users/you or ~ — scan walks the whole tree under it." }
                 button {
                     class: "btn btn-primary",
                     style: "margin-top: 12px;",

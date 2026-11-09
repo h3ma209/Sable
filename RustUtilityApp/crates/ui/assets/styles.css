@@ -380,6 +380,17 @@ button:disabled {
   font-weight: 600;
 }
 
+.nav-item:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  transform: none;
+  pointer-events: none;
+}
+
+.nav-item:disabled::before {
+  opacity: 0;
+}
+
 .nav-item.active::before {
   opacity: 1;
 }

@@ -31,7 +31,7 @@ pub use cleanup::{
     dev_junk_roots, directory_size, general_junk_candidates, junk_candidates, junk_roots,
     move_download_to_trash, move_root_to_trash, JunkRoot,
 };
-pub use duplicates::{find_duplicates, DuplicateGroup, DuplicateReport};
+pub use duplicates::{find_duplicates, resolve_duplicate_scan_root, DuplicateGroup, DuplicateReport};
 pub use cloud::{local_cloud_folders, CloudFolder};
 pub use clutter::{large_downloads, LargeFile};
 pub use control::ExecutionControl;
@@ -51,8 +51,11 @@ pub use telemetry::{
 pub use remove::{RemovalPlan, RemoveTask};
 pub use scan::{run_scan, ScanConfig};
 pub use space::{
-    cloud_status, computer_root, deletion_units, home_folder_access, is_spared, normalize_space_path, scan_space,
-    scan_space_volume, scan_space_volume_with_options, scan_space_volume_with_progress, space_folder, space_report_at, trash_selected, volume_contains, CloudScannerStrategy, CloudStatus,
+    cloud_status, computer_root, deletion_units, home_folder_access, is_spared, normalize_space_path,
+    effective_shallow_dir_names, parse_shallow_dir_names, scan_space, scan_space_volume,
+    scan_space_volume_with_options, scan_space_volume_with_progress, shallow_dir_basename_match,
+    shallow_dir_name_match, space_entry_size_only, DEFAULT_SPACE_SHALLOW_DIR_NAMES,
+    space_folder, space_report_at, trash_selected, volume_contains, CloudScannerStrategy, CloudStatus,
     DeletionUnit, SpaceEntity, SpaceFolder,
     SpaceNode, SpaceProgress, SpaceReport, SpaceVolumeScan, SPACE_LENS_BUBBLE_THRESHOLD,
 };

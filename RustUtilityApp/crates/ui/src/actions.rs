@@ -6,8 +6,9 @@ use dioxus::prelude::*;
 use engine::{
     dev_junk_roots, find_duplicates, flush_dns_cache, folder_access, junk_roots, large_downloads,
     launch_agents, list_local_snapshots, local_cloud_folders, machine_sample, move_download_to_trash,
-    move_root_to_trash, prepare_and_scan, reindex_spotlight, remember_ignore, run_care, run_scan,
-    scan_space_volume_with_options, space_report_at, spotlight_status, survey_leftovers, trash_selected,
+    move_root_to_trash, prepare_and_scan, reindex_spotlight, remember_ignore, resolve_duplicate_scan_root,
+    run_care, run_scan, scan_space_volume_with_options, space_entry_size_only, space_report_at, spotlight_status,
+    survey_leftovers, trash_selected,
     trash_threat as engine_trash_threat, volume_contains, computer_root, AccessStatus, ExecutionControl,
     MonitorAnalytics, TelemetryStore, VolumeBytes,
     ExtensionWatchDetector, MachineSample, ScanConfig, ScanEvent, SpaceProgress, SpaceReport,
@@ -189,7 +190,7 @@ pub fn start_duplicates(mut state: Signal<AppState>) {
     if state.read().busy {
         return;
     }
-    let root = PathBuf::from(normalize_space_path(&state.read().duplicates_root));
+    let root = resolve_duplicate_scan_root(&state.read().duplicates_root);
     arm(&mut state.write());
     state.write().status = "scanning";
     spawn(async move {
@@ -898,10 +899,14 @@ pub fn start_space(mut state: Signal<AppState>, force_rescan: bool) {
     let control_for_scan = Arc::clone(&control);
     let scan_id = {
         let mut s = state.write();
-        s.control = Some(control);
+        if let Some(previous) = s.control.take() {
+            previous.cancel();
+        }
         if force_rescan {
             s.space_volume = None;
+            s.space = None;
         }
+        s.control = Some(control);
         s.space = None;
         s.space_selected.clear();
         s.space_selected_bytes.clear();
@@ -937,13 +942,7 @@ pub fn start_space(mut state: Signal<AppState>, force_rescan: bool) {
         });
     }
 
-    let shallow_dirs: Vec<String> = state
-        .read()
-        .space_exclude_dirs
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let shallow_dirs = engine::parse_shallow_dir_names(&state.read().space_exclude_dirs);
 
     spawn(async move {
         let volume = scan_space_volume_with_options(
@@ -953,7 +952,7 @@ pub fn start_space(mut state: Signal<AppState>, force_rescan: bool) {
             shallow_dirs,
         ).await;
         let report = space_report_at(&volume, &view_folder).unwrap_or(SpaceReport {
-            root: view_folder,
+            root: view_folder.clone(),
             total: 0,
             children: Vec::new(),
         });
@@ -1000,7 +999,7 @@ pub fn space_open(mut state: Signal<AppState>, path: PathBuf) {
     if next == state.read().space_root.trim() {
         return;
     }
-    let ok = {
+    let (blocked_size_only, ok) = {
         let s = state.read();
         match s.space_volume.as_ref() {
             None => {
@@ -1012,9 +1011,21 @@ pub fn space_open(mut state: Signal<AppState>, path: PathBuf) {
                 });
                 return;
             }
-            Some(volume) => volume_contains(volume, &path),
+            Some(volume) => {
+                let size_only = space_entry_size_only(volume, &path);
+                let contains = volume_contains(volume, &path);
+                (size_only, contains)
+            }
         }
     };
+    if blocked_size_only {
+        state.write().notice = Some(Notice {
+            ok: false,
+            text: "That folder is excluded — size is counted but drill-in is disabled (e.g. node_modules).".into(),
+            refresh: None,
+        });
+        return;
+    }
     if !ok {
         state.write().notice = Some(Notice {
             ok: false,

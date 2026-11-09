@@ -7,6 +7,7 @@ use crate::state::{rail_groups, AppState};
 pub fn Sidebar(state: Signal<AppState>) -> Element {
     let screen = state.read().screen;
     let busy = state.read().busy;
+    let nav_locked = state.read().navigation_locked();
     let status = state.read().status;
     let granted = state.read().access == engine::AccessStatus::Granted;
     let (dot, label, hint) = if busy {
@@ -37,9 +38,19 @@ pub fn Sidebar(state: Signal<AppState>) -> Element {
                     div { class: "nav-group",
                         div { class: "nav-group-label", "{group}" }
                         for item in items.iter().copied() {
+                            {
+                                let is_active = item == screen;
+                                let nav_disabled = nav_locked && !is_active;
+                                rsx! {
                             button {
-                                class: if item == screen { "nav-item active" } else { "nav-item" },
-                                onclick: move |_| state.write().go(item),
+                                class: if is_active { "nav-item active" } else { "nav-item" },
+                                disabled: nav_disabled,
+                                title: if nav_disabled {
+                                    "Finish or stop the current task before switching sections"
+                                } else {
+                                    ""
+                                },
+                                onclick: move |_| state.write().try_go(item),
                                 img {
                                     class: "nav-icon",
                                     src: item.icon(),
@@ -48,6 +59,8 @@ pub fn Sidebar(state: Signal<AppState>) -> Element {
                                     height: "22",
                                 }
                                 span { "{item.label()}" }
+                            }
+                                }
                             }
                         }
                     }

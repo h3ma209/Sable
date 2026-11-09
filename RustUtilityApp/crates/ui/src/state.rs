@@ -309,6 +309,37 @@ impl AppState {
         self.notice = None;
     }
 
+    /// While a heavy scan runs (Space Lens, duplicates, care queue, …), block leaving the section.
+    pub fn navigation_locked(&self) -> bool {
+        self.busy
+    }
+
+    pub fn try_go(&mut self, screen: Screen) {
+        if self.navigation_locked() && screen != self.screen {
+            self.notice = Some(Notice {
+                ok: false,
+                text: format!(
+                    "{} is still running on {}. Stop or wait before opening another section.",
+                    self.status_label(),
+                    self.screen.label()
+                ),
+                refresh: None,
+            });
+            return;
+        }
+        self.go(screen);
+    }
+
+    fn status_label(&self) -> &'static str {
+        if self.status == "scanning" {
+            "A scan"
+        } else if self.status == "working" {
+            "A task"
+        } else {
+            "Background work"
+        }
+    }
+
     pub fn finish(&mut self) {
         let scanned = self.status == "scanning";
         self.busy = false;
