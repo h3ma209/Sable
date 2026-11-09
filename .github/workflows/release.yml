@@ -21,6 +21,9 @@ jobs:
         with:
           workspaces: RustUtilityApp
 
+      - name: Install packaging deps
+        run: python3 -m pip install pillow
+
       - name: Package Sable.app
         working-directory: RustUtilityApp
         run: make package
