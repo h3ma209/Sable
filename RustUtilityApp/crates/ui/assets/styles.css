@@ -1524,6 +1524,27 @@ button:disabled {
   font-family: var(--font-mono);
 }
 
+.rail-update-btn.update-ready {
+  background: rgba(30, 215, 96, 0.12);
+  border-color: rgba(30, 215, 96, 0.45);
+  box-shadow: 0 2px 10px rgba(30, 215, 96, 0.16);
+}
+
+.update-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1ed760;
+  box-shadow: 0 0 8px rgba(30, 215, 96, 0.75);
+  flex-shrink: 0;
+}
+
+.update-ver-ready {
+  background: rgba(30, 215, 96, 0.22);
+  color: #4ade80;
+  font-weight: 600;
+}
+
 /* ── Space Lens Scanning Progress Card ── */
 
 .space-progress-card {

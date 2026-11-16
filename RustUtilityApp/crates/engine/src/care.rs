@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::access::{folder_access, AccessStatus};
-use crate::apps::installed_apps;
+use crate::apps::installed_app_count;
 use crate::cleanup::junk_roots;
-use crate::performance::{launch_agents, machine_sample};
+use crate::performance::{launch_agents, machine_summary_sample};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CareState {
@@ -43,15 +43,16 @@ pub async fn run_care(home: PathBuf) -> CareReport {
     let home_cleanup = home.clone();
     let home_apps = home.clone();
     let home_agents = home.clone();
-    let (junk, apps, agents) = tokio::join!(
+    let (junk, app_count, agents, sample) = tokio::join!(
         tokio::task::spawn_blocking(move || junk_roots(&home_cleanup)),
-        tokio::task::spawn_blocking(move || installed_apps(&home_apps)),
+        tokio::task::spawn_blocking(move || installed_app_count(&home_apps)),
         tokio::task::spawn_blocking(move || launch_agents(&home_agents)),
+        tokio::task::spawn_blocking(machine_summary_sample),
     );
     let junk = junk.unwrap_or_default();
-    let apps = apps.unwrap_or_default();
+    let app_count = app_count.unwrap_or(0);
     let agents = agents.unwrap_or_default();
-    let sample = tokio::task::spawn_blocking(machine_sample).await.unwrap_or(crate::performance::MachineSample {
+    let sample = sample.unwrap_or(crate::performance::MachineSample {
         used_memory: 0,
         total_memory: 0,
         available_memory: 0,
@@ -72,7 +73,7 @@ pub async fn run_care(home: PathBuf) -> CareReport {
     CareReport {
         access,
         cleanup_bytes: cache_bytes,
-        app_count: apps.len(),
+        app_count,
         agent_count: agents.len(),
         modules: vec![
             ModuleResult {
@@ -99,7 +100,7 @@ pub async fn run_care(home: PathBuf) -> CareReport {
             },
             ModuleResult {
                 name: "Applications".into(),
-                summary: format!("{} apps", apps.len()),
+                summary: format!("{} apps", app_count),
             },
         ],
     }

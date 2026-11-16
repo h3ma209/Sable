@@ -208,6 +208,7 @@ pub struct AppState {
     pub space_progress_total_bytes: u64,
     pub space_progress_items: u64,
     pub space_progress_current: String,
+    pub available_update: Option<String>,
 }
 
 impl AppState {
@@ -301,6 +302,7 @@ impl AppState {
             space_progress_total_bytes: 0,
             space_progress_items: 0,
             space_progress_current: String::new(),
+            available_update: None,
         }
     }
 

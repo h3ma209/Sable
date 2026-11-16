@@ -70,63 +70,141 @@ fn walk_leftovers(dir: &Path, label: &str, bundle_id: &str, depth: usize, hits: 
     }
 }
 
+/// Fast count of installed `.app` bundles without parsing plists or decoding icons.
+pub fn installed_app_count(home: &Path) -> usize {
+    let mut count = 0usize;
+    for dir in [PathBuf::from("/Applications"), home.join("Applications")] {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if count >= 120 {
+                return count;
+            }
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("app")
+                && path.join("Contents/Info.plist").is_file()
+            {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
 /// Reads `CFBundleName` and `CFBundleIdentifier` from application bundles.
 pub fn installed_apps(home: &Path) -> Vec<InstalledApp> {
-    let mut apps = Vec::new();
+    let mut bundle_paths = Vec::new();
     for dir in [PathBuf::from("/Applications"), home.join("Applications")] {
-        collect_apps(&dir, &mut apps);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if bundle_paths.len() >= 120 {
+                break;
+            }
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("app")
+                && path.join("Contents/Info.plist").is_file()
+            {
+                bundle_paths.push(path);
+            }
+        }
     }
+
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get().clamp(2, 8))
+        .unwrap_or(4);
+    let next_idx = std::sync::atomic::AtomicUsize::new(0);
+    let results: std::sync::Mutex<Vec<InstalledApp>> = std::sync::Mutex::new(Vec::with_capacity(bundle_paths.len()));
+
+    std::thread::scope(|s| {
+        for _ in 0..workers {
+            s.spawn(|| {
+                let mut local = Vec::new();
+                loop {
+                    let i = next_idx.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if i >= bundle_paths.len() {
+                        break;
+                    }
+                    let path = &bundle_paths[i];
+                    let plist = path.join("Contents/Info.plist");
+                    let plist_text = std::fs::read(&plist)
+                        .ok()
+                        .and_then(|b| if !b.starts_with(b"bplist") { String::from_utf8(b).ok() } else { None });
+                    let read_key = |key: &str| -> Option<String> {
+                        if let Some(ref xml) = plist_text {
+                            xml_plist_string(xml, key)
+                        } else {
+                            plist_raw(&plist, key)
+                        }
+                    };
+                    let name = read_key("CFBundleName")
+                        .or_else(|| read_key("CFBundleDisplayName"))
+                        .unwrap_or_else(|| {
+                            path.file_stem()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or("App")
+                                .to_string()
+                        });
+                    let bundle_id = read_key("CFBundleIdentifier").unwrap_or_default();
+                    let icon_data_url = resolve_app_icon_with(path, &plist, &name, &read_key);
+                    local.push(InstalledApp {
+                        name,
+                        bundle_id,
+                        path: path.clone(),
+                        icon_data_url,
+                    });
+                }
+                if let Ok(mut guard) = results.lock() {
+                    guard.extend(local);
+                }
+            });
+        }
+    });
+
+    let mut apps = results.into_inner().unwrap_or_default();
     apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     apps
 }
 
-fn collect_apps(dir: &Path, apps: &mut Vec<InstalledApp>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
-        if apps.len() >= 120 {
-            return;
+fn xml_plist_string(xml: &str, key: &str) -> Option<String> {
+    let needle = format!("<key>{key}</key>");
+    let idx = xml.find(&needle)?;
+    let rest = &xml[idx + needle.len()..];
+    let s_start = rest.find("<string>")?;
+    // Ensure we didn't cross into the next <key>
+    if let Some(next_key) = rest.find("<key>") {
+        if next_key < s_start {
+            return None;
         }
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("app") {
-            continue;
-        }
-        let plist = path.join("Contents/Info.plist");
-        if !plist.is_file() {
-            continue;
-        }
-        let name = plist_raw(&plist, "CFBundleName")
-            .or_else(|| plist_raw(&plist, "CFBundleDisplayName"))
-            .unwrap_or_else(|| {
-                path.file_stem()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("App")
-                    .to_string()
-            });
-        let bundle_id = plist_raw(&plist, "CFBundleIdentifier").unwrap_or_default();
-        let icon_data_url = resolve_app_icon(&path, &plist, &name);
-        apps.push(InstalledApp {
-            name,
-            bundle_id,
-            path,
-            icon_data_url,
-        });
+    }
+    let after_open = &rest[s_start + "<string>".len()..];
+    let s_end = after_open.find("</string>")?;
+    let val = after_open[..s_end].trim();
+    if val.is_empty() {
+        None
+    } else {
+        Some(val.to_string())
     }
 }
 
-fn resolve_app_icon(app_path: &Path, plist: &Path, app_name: &str) -> Option<String> {
+fn resolve_app_icon_with(
+    app_path: &Path,
+    _plist: &Path,
+    app_name: &str,
+    read_key: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
     let resources = app_path.join("Contents/Resources");
     let mut candidates = Vec::new();
 
-    if let Some(icon_name) = plist_raw(plist, "CFBundleIconFile") {
+    if let Some(icon_name) = read_key("CFBundleIconFile") {
         candidates.push(resources.join(&icon_name));
         if !icon_name.ends_with(".icns") {
             candidates.push(resources.join(format!("{icon_name}.icns")));
         }
     }
-    if let Some(icon_name) = plist_raw(plist, "CFBundleIconName") {
+    if let Some(icon_name) = read_key("CFBundleIconName") {
         candidates.push(resources.join(&icon_name));
         if !icon_name.ends_with(".icns") {
             candidates.push(resources.join(format!("{icon_name}.icns")));

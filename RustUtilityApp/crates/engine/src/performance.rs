@@ -132,20 +132,33 @@ fn load_averages() -> (f32, f32, f32) {
 
 /// One memory read and a short CPU sample. This loop is new. The original binary did not expose one.
 pub fn machine_sample() -> MachineSample {
+    machine_sample_inner(true)
+}
+
+/// Fast CPU + memory sample without enumerating all processes (used on Care startup).
+pub fn machine_summary_sample() -> MachineSample {
+    machine_sample_inner(false)
+}
+
+fn machine_sample_inner(include_processes: bool) -> MachineSample {
     let mut system = monitor_system()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     // sysinfo CPU is a delta; needs two refreshes on the same System handle.
     system.refresh_memory_specifics(MemoryRefreshKind::everything());
     system.refresh_cpu_usage();
-    system.refresh_processes(ProcessesToUpdate::All, true);
+    if include_processes {
+        system.refresh_processes(ProcessesToUpdate::All, true);
+    }
     std::thread::sleep(MINIMUM_CPU_UPDATE_INTERVAL);
     system.refresh_memory_specifics(MemoryRefreshKind::everything());
     system.refresh_cpu_usage();
-    system.refresh_processes(ProcessesToUpdate::All, true);
+    if include_processes {
+        system.refresh_processes(ProcessesToUpdate::All, true);
+    }
     let cpu_percent = system.global_cpu_usage();
     let (load_avg_1m, load_avg_5m, load_avg_15m) = load_averages();
-    let process_count = system.processes().len();
+    let process_count = if include_processes { system.processes().len() } else { 0 };
     MachineSample {
         used_memory: system.used_memory(),
         total_memory: system.total_memory(),
@@ -159,8 +172,8 @@ pub fn machine_sample() -> MachineSample {
         load_avg_5m,
         load_avg_15m,
         boot_volume: boot_volume_bytes(),
-        top_cpu: top_processes(&system, true, 12),
-        top_mem: top_processes(&system, false, 12),
+        top_cpu: if include_processes { top_processes(&system, true, 12) } else { Vec::new() },
+        top_mem: if include_processes { top_processes(&system, false, 12) } else { Vec::new() },
     }
 }
 

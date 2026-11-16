@@ -93,18 +93,44 @@ pub fn junk_candidates(home: &Path) -> Vec<(&'static str, PathBuf)> {
 }
 
 fn survey_candidates(candidates: Vec<(&'static str, PathBuf)>) -> Vec<JunkRoot> {
-    candidates
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+    let slots: Vec<std::sync::Mutex<Option<JunkRoot>>> =
+        candidates.iter().map(|_| std::sync::Mutex::new(None)).collect();
+    let next_idx = std::sync::atomic::AtomicUsize::new(0);
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get().clamp(2, 8))
+        .unwrap_or(4)
+        .min(candidates.len());
+
+    std::thread::scope(|s| {
+        for _ in 0..workers {
+            s.spawn(|| {
+                loop {
+                    let i = next_idx.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if i >= candidates.len() {
+                        break;
+                    }
+                    let (label, ref path) = candidates[i];
+                    let exists = path.is_dir();
+                    let bytes = if exists { directory_size(path) } else { 0 };
+                    if let Ok(mut guard) = slots[i].lock() {
+                        *guard = Some(JunkRoot {
+                            label: label.to_string(),
+                            path: path.clone(),
+                            bytes,
+                            exists,
+                        });
+                    }
+                }
+            });
+        }
+    });
+
+    slots
         .into_iter()
-        .map(|(label, path)| {
-            let exists = path.is_dir();
-            let bytes = if exists { directory_size(&path) } else { 0 };
-            JunkRoot {
-                label: label.to_string(),
-                path,
-                bytes,
-                exists,
-            }
-        })
+        .filter_map(|m| m.into_inner().ok().flatten())
         .collect()
 }
 

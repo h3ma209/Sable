@@ -10,6 +10,7 @@ pub fn Sidebar(state: Signal<AppState>) -> Element {
     let nav_locked = state.read().navigation_locked();
     let status = state.read().status;
     let granted = state.read().access == engine::AccessStatus::Granted;
+    let available_update = state.read().available_update.clone();
     let (dot, label, hint) = if busy {
         ("busy", "Working", status)
     } else if granted {
@@ -68,19 +69,33 @@ pub fn Sidebar(state: Signal<AppState>) -> Element {
             }
             div { class: "rail-footer-actions",
                 button {
-                    class: "rail-update-btn",
+                    class: if available_update.is_some() { "rail-update-btn update-ready" } else { "rail-update-btn" },
                     disabled: busy,
-                    title: "Check for Sable updates",
+                    title: if let Some(ref tag) = available_update {
+                        format!("Update available: {} (running v{}). Click to install.", tag, env!("CARGO_PKG_VERSION"))
+                    } else {
+                        "Check for Sable updates".to_string()
+                    },
                     onclick: move |_| crate::actions::check_for_updates(state),
-                    img {
-                        class: "update-icon",
-                        src: ICON_DOWNLOAD,
-                        alt: "",
-                        width: "14",
-                        height: "14",
+                    if available_update.is_some() {
+                        span { class: "update-dot" }
+                    } else {
+                        img {
+                            class: "update-icon",
+                            src: ICON_DOWNLOAD,
+                            alt: "",
+                            width: "14",
+                            height: "14",
+                        }
                     }
-                    span { class: "update-btn-text", "Check for Updates" }
-                    span { class: "update-ver-tag", "v{env!(\"CARGO_PKG_VERSION\")}" }
+                    span { class: "update-btn-text",
+                        if available_update.is_some() { "Update Available" } else { "Check for Updates" }
+                    }
+                    if let Some(ref tag) = available_update {
+                        span { class: "update-ver-tag update-ver-ready", "{tag}" }
+                    } else {
+                        span { class: "update-ver-tag", "v{env!(\"CARGO_PKG_VERSION\")}" }
+                    }
                 }
             }
             div { class: "rail-foot glass",

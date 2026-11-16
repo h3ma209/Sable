@@ -46,11 +46,8 @@ pub fn ensure_auto_load(state: Signal<AppState>) {
         return;
     }
     let screen = state.read().screen;
-    for s in [screen, Screen::Care, Screen::Cleanup] {
-        if s.auto_loads() && !state.read().loaded.contains(&s) {
-            load(state, s);
-            break;
-        }
+    if screen.auto_loads() && !state.read().loaded.contains(&screen) {
+        load(state, screen);
     }
 }
 
@@ -1207,6 +1204,7 @@ pub fn check_for_updates_on_startup(mut state: Signal<AppState>) {
             let latest_clean = info.tag.trim().trim_start_matches('v');
             if is_version_newer(latest_clean, current_version) {
                 let mut s = state.write();
+                s.available_update = Some(info.tag.clone());
                 s.confirm = Some(crate::state::Confirm {
                     heading: format!("Update Available: {}", info.tag),
                     body: format!(
@@ -1250,6 +1248,7 @@ pub fn check_for_updates(mut state: Signal<AppState>) {
                 let latest_clean = info.tag.trim().trim_start_matches('v');
                 let is_newer = is_version_newer(latest_clean, current_version);
                 if is_newer {
+                    s.available_update = Some(info.tag.clone());
                     s.confirm = Some(crate::state::Confirm {
                         heading: format!("Update Available: {}", info.tag),
                         body: format!(
@@ -1265,6 +1264,7 @@ pub fn check_for_updates(mut state: Signal<AppState>) {
                         },
                     });
                 } else {
+                    s.available_update = None;
                     s.confirm = Some(crate::state::Confirm {
                         heading: "Sable is Up to Date".into(),
                         body: format!(

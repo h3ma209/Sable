@@ -1,7 +1,7 @@
 cask "sable" do
-  version "0.3.11"
-  sha256 "37ba58efd142b9c031c171011145a1e82e1dcc65b8391e77fd3878f1e1be46d8"
-  url "https://github.com/h3ma209/Sable/releases/download/v0.3.11/Sable-0.3.11-macos-arm64.dmg"
+  version "0.3.12"
+  sha256 "5fd6b93c37c6d05835c27a8c426313f8c6ef97a897a1932da181220800b74f5d"
+  url "https://github.com/h3ma209/Sable/releases/download/v0.3.12/Sable-0.3.12-macos-arm64.dmg"
 
   name "Sable"
   desc "Open-source disk cleaner and space analyzer for macOS"
