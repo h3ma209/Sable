@@ -397,8 +397,8 @@
         </div>
         <div class="install-label">Homebrew (after tap publish)</div>
         <div class="terminal-box" style="width:100%; justify-content: space-between;">
-          <div class="terminal-code"><span>brew tap h3ma209/sable</span> &amp;&amp; brew install --cask sable</div>
-          <button class="copy-btn" onclick="navigator.clipboard.writeText('brew tap h3ma209/sable && brew install --cask sable'); this.innerText='Copied!'; setTimeout(() => this.innerText='Copy', 2000)">Copy</button>
+          <div class="terminal-code"><span>brew tap h3ma209/sable</span> &amp;&amp; brew trust h3ma209/sable &amp;&amp; brew install --cask sable</div>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText('brew tap h3ma209/sable && brew trust h3ma209/sable && brew install --cask sable'); this.innerText='Copied!'; setTimeout(() => this.innerText='Copy', 2000)">Copy</button>
         </div>
         <div class="install-label warn">Advanced — review script; optional Gatekeeper quarantine bypass</div>
         <div class="terminal-box" style="width:100%; justify-content: space-between;">

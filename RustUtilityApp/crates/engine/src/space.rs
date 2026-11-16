@@ -35,9 +35,9 @@ struct PathFilter {
 static SPACE_SCAN_SERIAL: Mutex<()> = Mutex::new(());
 
 /// Stop mapping individual children deeper than this (folder still gets total size via fast_dir_sum).
-const SPACE_MAP_MAX_DEPTH: usize = 28;
+const SPACE_MAP_MAX_DEPTH: usize = 32;
 /// Cap mapped directory nodes so home / “This Mac” scans stay bounded in memory.
-const SPACE_MAP_MAX_DIRECTORY_NODES: usize = 80_000;
+const SPACE_MAP_MAX_DIRECTORY_NODES: usize = 300_000;
 
 /// Always size-only — never map individual children (merged with the UI exclude field).
 pub const DEFAULT_SPACE_SHALLOW_DIR_NAMES: &[&str] = &[
@@ -428,10 +428,13 @@ pub fn parse_shallow_dir_names(raw: &str) -> Vec<String> {
 }
 
 pub fn effective_shallow_dir_names(user: &[String]) -> Vec<String> {
-    let mut names: HashSet<String> = DEFAULT_SPACE_SHALLOW_DIR_NAMES
-        .iter()
-        .map(|s| s.to_ascii_lowercase())
-        .collect();
+    if user.is_empty() {
+        return DEFAULT_SPACE_SHALLOW_DIR_NAMES
+            .iter()
+            .map(|s| s.to_ascii_lowercase())
+            .collect();
+    }
+    let mut names: HashSet<String> = HashSet::new();
     for entry in user {
         let clean = entry.trim().trim_matches('/').to_ascii_lowercase();
         if !clean.is_empty() {
@@ -441,16 +444,40 @@ pub fn effective_shallow_dir_names(user: &[String]) -> Vec<String> {
     names.into_iter().collect()
 }
 
-/// True when this directory's final name is in the exclude list (basename match only).
-pub fn shallow_dir_basename_match(path: &Path, shallow_dirs: &[String]) -> bool {
-    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-        return false;
-    };
-    let name_lower = name.to_ascii_lowercase();
-    shallow_dirs.iter().any(|sh| {
-        let clean = sh.trim().trim_matches('/').to_ascii_lowercase();
-        !clean.is_empty() && name_lower == clean
+/// Matches path against exclusion patterns (bare folder name, relative subpath, or absolute path).
+/// Strict match: only matches the target directory itself, NEVER its parents or siblings.
+pub fn is_shallow_path(path: &Path, shallow_patterns: &[String]) -> bool {
+    let name_lower = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_ascii_lowercase());
+
+    let path_str_lower = path.to_string_lossy().to_ascii_lowercase();
+
+    shallow_patterns.iter().any(|pattern| {
+        let clean = pattern.trim().trim_matches('/').to_ascii_lowercase();
+        if clean.is_empty() {
+            return false;
+        }
+
+        if clean.contains('/') {
+            let suffix = format!("/{}", clean);
+            if path_str_lower.ends_with(&clean) || path_str_lower.ends_with(&suffix) {
+                return true;
+            }
+            if path_str_lower == clean || path_str_lower == format!("/{}", clean) {
+                return true;
+            }
+            false
+        } else {
+            name_lower.as_deref() == Some(&clean)
+        }
     })
+}
+
+/// True when this directory's final name is in the exclude list.
+pub fn shallow_dir_basename_match(path: &Path, shallow_dirs: &[String]) -> bool {
+    is_shallow_path(path, shallow_dirs)
 }
 
 pub fn shallow_dir_name_match(name: &str, shallow_dirs: &[String]) -> bool {
@@ -468,7 +495,7 @@ pub fn space_entry_size_only(volume: &SpaceVolumeScan, folder: &Path) -> bool {
 }
 
 fn is_shallow_dir(task: &ScanTask, path: &Path) -> bool {
-    shallow_dir_basename_match(path, &task.shallow_dirs)
+    is_shallow_path(path, &task.shallow_dirs)
 }
 
 /// Total size without listing or mapping inner paths (single progress tick per excluded folder).
@@ -722,7 +749,7 @@ fn build_entity(
                 path,
                 bytes,
                 is_directory: true,
-                size_only: collapse_budget,
+                size_only: false,
                 is_purgeable: false,
                 cloud,
                 leaves,
@@ -737,7 +764,7 @@ fn build_entity(
                 path,
                 bytes,
                 is_directory: true,
-                size_only: true,
+                size_only: false,
                 is_purgeable: false,
                 cloud,
                 leaves,
@@ -1228,6 +1255,76 @@ mod tests {
             "defaults must always include node_modules"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn excluded_dir_does_not_exclude_parent_or_siblings() {
+        let dir = std::env::temp_dir().join(format!("rust_utility_parent_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let parent = dir.join("parent1");
+        let c1 = parent.join("c1");
+        let c2 = parent.join("c2");
+        let c3 = parent.join("c3");
+        let nm = parent.join("node_modules");
+
+        std::fs::create_dir_all(&c1).unwrap();
+        std::fs::create_dir_all(&c2).unwrap();
+        std::fs::create_dir_all(&c3).unwrap();
+        std::fs::create_dir_all(&nm).unwrap();
+
+        std::fs::write(c1.join("file1.bin"), vec![b'1'; 1024]).unwrap();
+        std::fs::write(c2.join("file2.bin"), vec![b'2'; 2048]).unwrap();
+        std::fs::write(c3.join("file3.bin"), vec![b'3'; 3072]).unwrap();
+        std::fs::write(nm.join("pkg.bin"), vec![b'9'; 4096]).unwrap();
+
+        let volume = scan_space_volume_with_options(
+            dir.clone(),
+            None,
+            None,
+            vec!["node_modules".to_string()],
+        )
+        .await;
+
+        let parent_node = volume.root.children.iter().find(|c| c.path.ends_with("parent1")).expect("parent1 exists");
+        assert!(!parent_node.size_only, "parent1 must NOT be labeled size_only");
+        assert_eq!(parent_node.children.len(), 4, "parent1 must contain all 4 children (c1, c2, c3, node_modules)");
+
+        let c1_node = parent_node.children.iter().find(|c| c.path.ends_with("c1")).expect("c1 exists");
+        assert!(!c1_node.size_only, "c1 must NOT be size_only");
+        assert!(!c1_node.children.is_empty(), "c1 children must be dived into");
+
+        let c2_node = parent_node.children.iter().find(|c| c.path.ends_with("c2")).expect("c2 exists");
+        assert!(!c2_node.size_only, "c2 must NOT be size_only");
+
+        let c3_node = parent_node.children.iter().find(|c| c.path.ends_with("c3")).expect("c3 exists");
+        assert!(!c3_node.size_only, "c3 must NOT be size_only");
+
+        let nm_node = parent_node.children.iter().find(|c| c.path.ends_with("node_modules")).expect("node_modules exists");
+        assert!(nm_node.size_only, "node_modules MUST be size_only");
+        assert!(nm_node.children.is_empty(), "node_modules must NOT have children mapped");
+        assert!(nm_node.bytes >= 4096, "node_modules size must be counted");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn is_shallow_path_matching_rules() {
+        let patterns = vec!["node_modules".to_string(), "parent1/cache".to_string()];
+
+        assert!(is_shallow_path(Path::new("/Users/test/node_modules"), &patterns));
+        assert!(is_shallow_path(Path::new("/Users/test/parent1/node_modules"), &patterns));
+        assert!(is_shallow_path(Path::new("/Users/test/parent1/cache"), &patterns));
+
+        // Parent must NOT match
+        assert!(!is_shallow_path(Path::new("/Users/test/parent1"), &patterns));
+        // Siblings must NOT match
+        assert!(!is_shallow_path(Path::new("/Users/test/parent1/c1"), &patterns));
+        assert!(!is_shallow_path(Path::new("/Users/test/parent1/c2"), &patterns));
+        assert!(!is_shallow_path(Path::new("/Users/test/parent1/c3"), &patterns));
+        // Substrings must NOT match bare name
+        assert!(!is_shallow_path(Path::new("/Users/test/node_modules_backup"), &patterns));
+        assert!(!is_shallow_path(Path::new("/Users/test/my-node_modules"), &patterns));
     }
 
     #[test]

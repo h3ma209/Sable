@@ -8,6 +8,7 @@ Users install:
 
 ```bash
 brew tap h3ma209/sable
+brew trust h3ma209/sable   # Homebrew 7+: trust the tap before install
 brew install --cask sable
 ```
 

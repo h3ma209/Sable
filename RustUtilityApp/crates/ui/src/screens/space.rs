@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use dioxus::prelude::*;
-use engine::{computer_root, effective_shallow_dir_names, parse_shallow_dir_names, shallow_dir_name_match};
+use engine::{computer_root, effective_shallow_dir_names, is_shallow_path, parse_shallow_dir_names};
 
 use crate::actions::{space_back, space_forward, space_open, start_space, stop_space};
 use crate::assets::{ICON_FOLDER, ICON_HOUSE};
@@ -247,18 +247,19 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
                                 let (cat_color, cat_label) = space_category_style(is_dir, &name);
                                 let is_dev = is_dev_artifact(&name);
                                 let size_only = child.size_only
-                                    || (is_dir && shallow_dir_name_match(&name, &shallow_names));
+                                    || (is_dir && is_shallow_path(&child.path, &shallow_names));
                                 let can_drill = is_dir && !size_only;
 
                                 rsx! {
                                     div { class: "row", style: "align-items: center;",
                                         div {
                                             class: "row-body",
-                                            style: if can_drill || !is_dir { "cursor: pointer;" } else { "cursor: default;" },
+                                            style: "cursor: pointer;",
+                                            title: if size_only { "Excluded folder (size only). Click to open in Finder." } else { "" },
                                             onclick: move |_| {
                                                 if can_drill {
                                                     space_open(state, path_open.clone());
-                                                } else if !is_dir {
+                                                } else {
                                                     reveal(&path_open);
                                                 }
                                             },

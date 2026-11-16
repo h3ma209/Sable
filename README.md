@@ -47,6 +47,7 @@ Publish the cask from [`packaging/homebrew/Casks/sable.rb`](packaging/homebrew/C
 
 ```bash
 brew tap h3ma209/sable
+brew trust h3ma209/sable   # required on Homebrew 7+ for third-party casks
 brew install --cask sable
 ```
 

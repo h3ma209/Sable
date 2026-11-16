@@ -1019,9 +1019,10 @@ pub fn space_open(mut state: Signal<AppState>, path: PathBuf) {
         }
     };
     if blocked_size_only {
+        crate::util::reveal(&path);
         state.write().notice = Some(Notice {
-            ok: false,
-            text: "That folder is excluded — size is counted but drill-in is disabled (e.g. node_modules).".into(),
+            ok: true,
+            text: format!("Opened in Finder: {}", path.display()),
             refresh: None,
         });
         return;

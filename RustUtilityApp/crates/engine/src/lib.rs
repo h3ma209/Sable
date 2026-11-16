@@ -54,7 +54,7 @@ pub use space::{
     cloud_status, computer_root, deletion_units, home_folder_access, is_spared, normalize_space_path,
     effective_shallow_dir_names, parse_shallow_dir_names, scan_space, scan_space_volume,
     scan_space_volume_with_options, scan_space_volume_with_progress, shallow_dir_basename_match,
-    shallow_dir_name_match, space_entry_size_only, DEFAULT_SPACE_SHALLOW_DIR_NAMES,
+    shallow_dir_name_match, is_shallow_path, space_entry_size_only, DEFAULT_SPACE_SHALLOW_DIR_NAMES,
     space_folder, space_report_at, trash_selected, volume_contains, CloudScannerStrategy, CloudStatus,
     DeletionUnit, SpaceEntity, SpaceFolder,
     SpaceNode, SpaceProgress, SpaceReport, SpaceVolumeScan, SPACE_LENS_BUBBLE_THRESHOLD,
