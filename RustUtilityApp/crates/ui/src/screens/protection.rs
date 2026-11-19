@@ -38,10 +38,10 @@ pub fn ProtectionScreen(mut state: Signal<AppState>) -> Element {
         }
         NoticeBanner { state }
 
-        div { class: "card", style: "margin-bottom: 14px; padding: 16px;",
-            div { style: "display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; margin-bottom: 12px;",
+        div { class: "card", style: "margin-bottom: 14px; padding: 18px;",
+            div { class: "grid grid-2", style: "margin-bottom: 14px;",
                 div {
-                    div { class: "task-title", style: "margin-bottom: 6px; font-size: 12px;", "Folder" }
+                    div { class: "task-title", style: "margin-bottom: 6px;", "Folder" }
                     input {
                         class: "field",
                         value: "{root}",
@@ -51,7 +51,7 @@ pub fn ProtectionScreen(mut state: Signal<AppState>) -> Element {
                     }
                 }
                 div {
-                    div { class: "task-title", style: "margin-bottom: 6px; font-size: 12px;", "Filename (fuzzy / pattern)" }
+                    div { class: "task-title", style: "margin-bottom: 6px;", "Filename (fuzzy / pattern)" }
                     input {
                         class: "field",
                         value: "{filename_query}",
@@ -61,9 +61,9 @@ pub fn ProtectionScreen(mut state: Signal<AppState>) -> Element {
                     }
                 }
             }
-            div { style: "display: grid; grid-template-columns: 1fr 1.2fr; gap: 12px;",
+            div { class: "grid grid-2",
                 div {
-                    div { class: "task-title", style: "margin-bottom: 6px; font-size: 12px;", "Extensions" }
+                    div { class: "task-title", style: "margin-bottom: 6px;", "Extensions" }
                     input {
                         class: "field",
                         value: "{watch}",
@@ -73,7 +73,7 @@ pub fn ProtectionScreen(mut state: Signal<AppState>) -> Element {
                     }
                 }
                 div {
-                    div { class: "task-title", style: "margin-bottom: 6px; font-size: 12px;", "Exclude Folders" }
+                    div { class: "task-title", style: "margin-bottom: 6px;", "Exclude Folders" }
                     input {
                         class: "field",
                         value: "{exclude_dirs}",
@@ -84,8 +84,8 @@ pub fn ProtectionScreen(mut state: Signal<AppState>) -> Element {
                 }
             }
             if busy || scan_ran {
-                div { class: "summary-bar", style: "margin: 14px 0 0; box-shadow: none; display: flex; justify-content: space-between; align-items: center;",
-                    div { style: "display: flex; gap: 16px; align-items: center;",
+                div { class: "summary-bar", style: "margin: 14px 0 0; box-shadow: none; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center;",
+                    div { style: "display: flex; flex-wrap: wrap; gap: 16px; align-items: center;",
                         if busy {
                             div { class: "spinner", style: "width: 14px; height: 14px; border-width: 2px;" }
                         }
@@ -98,14 +98,14 @@ pub fn ProtectionScreen(mut state: Signal<AppState>) -> Element {
                     if busy {
                         button {
                             class: "btn btn-secondary",
-                            style: "padding: 3px 10px; font-size: 11px; border-radius: 6px;",
+                            style: "min-height: 32px; padding: 0 14px; font-size: var(--text-xs);",
                             onclick: move |_| stop_scan(state),
                             "Stop Scan"
                         }
                     }
                 }
                 if busy && !last_path.is_empty() {
-                    p { class: "row-sub", style: "margin-top: 8px; font-family: monospace; font-size: 11px;",
+                    p { class: "row-sub", style: "margin-top: 8px; font-family: monospace;",
                         "Scanning: {last_path}"
                     }
                 }

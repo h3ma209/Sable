@@ -6,8 +6,8 @@ use std::time::Instant;
 use engine::{
     folder_access, AccessStatus, CareReport, CloudFolder, Detection, DuplicateReport, HostPoint,
     InstalledApp, JunkRoot, LargeFile, LaunchAgent, LeftoverHit, MachineSample, MonitorAnalytics,
-    ProcessPoint, SnapshotReport, SpaceReport, SpaceVolumeScan, TelemetrySummary, ThreatReport,
-    ExecutionControl,
+    ProcessDetail, ProcessPoint, ProcessSignal, SnapshotReport, SpaceReport, SpaceVolumeScan,
+    TelemetrySummary, ThreatReport, ExecutionControl,
 };
 
 use crate::assets::*;
@@ -112,6 +112,44 @@ pub enum ConfirmKind {
         fallback_url: Option<String>,
         is_dmg: bool,
     },
+    SignalProcess {
+        pid: u32,
+        name: String,
+        signal: ProcessSignal,
+    },
+    SignalProcessGroup {
+        group_name: String,
+        pids: Vec<u32>,
+        signal: ProcessSignal,
+    },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ProcessViewMode {
+    Grouped,
+    Flat,
+    Tree,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ProcessSort {
+    Cpu,
+    Memory,
+    Pid,
+    Name,
+    User,
+    Threads,
+    DiskIo,
+    Runtime,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ProcessScope {
+    All,
+    Apps,
+    Mine,
+    Active,
+    HeavyRam,
 }
 
 #[derive(Clone)]
@@ -202,6 +240,23 @@ pub struct AppState {
     pub monitor_spark_cpu: Vec<f32>,
     pub monitor_spark_mem: Vec<f32>,
     pub monitor_spark_swap: Vec<f32>,
+    pub monitor_poll_ms: u64,
+    pub monitor_spark_net_rx: Vec<f32>,
+    pub monitor_spark_net_tx: Vec<f32>,
+    pub monitor_spark_disk_r: Vec<f32>,
+    pub monitor_spark_disk_w: Vec<f32>,
+    pub monitor_proc_query: String,
+    pub monitor_proc_sort: ProcessSort,
+    pub monitor_proc_asc: bool,
+    pub monitor_proc_view: ProcessViewMode,
+    pub monitor_expanded_groups: HashSet<String>,
+    pub monitor_cores_expanded: bool,
+    pub monitor_proc_scope: ProcessScope,
+    pub monitor_proc_show_all: bool,
+    pub monitor_selected_pid: Option<u32>,
+    pub monitor_process_detail: Option<ProcessDetail>,
+    pub monitor_detail_loading: bool,
+    pub current_user: String,
     #[allow(dead_code)]
     pub malware_show_skipped: bool,
     pub space_progress_bytes: u64,
@@ -297,6 +352,23 @@ impl AppState {
             monitor_spark_cpu: Vec::new(),
             monitor_spark_mem: Vec::new(),
             monitor_spark_swap: Vec::new(),
+            monitor_poll_ms: 2000,
+            monitor_spark_net_rx: Vec::new(),
+            monitor_spark_net_tx: Vec::new(),
+            monitor_spark_disk_r: Vec::new(),
+            monitor_spark_disk_w: Vec::new(),
+            monitor_proc_query: String::new(),
+            monitor_proc_sort: ProcessSort::Cpu,
+            monitor_proc_asc: false,
+            monitor_proc_view: ProcessViewMode::Grouped,
+            monitor_expanded_groups: HashSet::new(),
+            monitor_cores_expanded: true,
+            monitor_proc_scope: ProcessScope::All,
+            monitor_proc_show_all: false,
+            monitor_selected_pid: None,
+            monitor_process_detail: None,
+            monitor_detail_loading: false,
+            current_user: std::env::var("USER").unwrap_or_default(),
             malware_show_skipped: false,
             space_progress_bytes: 0,
             space_progress_total_bytes: 0,

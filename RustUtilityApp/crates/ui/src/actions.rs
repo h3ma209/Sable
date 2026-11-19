@@ -4,14 +4,16 @@ use std::sync::Arc;
 
 use dioxus::prelude::*;
 use engine::{
-    dev_junk_roots, find_duplicates, flush_dns_cache, folder_access, junk_roots, large_downloads,
-    launch_agents, list_local_snapshots, local_cloud_folders, machine_sample, move_download_to_trash,
-    move_root_to_trash, prepare_and_scan, reindex_spotlight, remember_ignore, resolve_duplicate_scan_root,
-    run_care, run_scan, scan_space_volume_with_options, space_entry_size_only, space_report_at, spotlight_status,
-    survey_leftovers, trash_selected,
-    trash_threat as engine_trash_threat, volume_contains, computer_root, AccessStatus, ExecutionControl,
-    MonitorAnalytics, TelemetryStore, VolumeBytes,
-    ExtensionWatchDetector, MachineSample, ScanConfig, ScanEvent, SpaceProgress, SpaceReport,
+    dev_junk_roots, find_duplicates, flush_dns_cache, folder_access, inspect_process_details,
+    junk_roots, large_downloads, launch_agents, list_local_snapshots, local_cloud_folders,
+    machine_sample, move_download_to_trash, move_root_to_trash, prepare_and_scan,
+    reindex_spotlight, remember_ignore, renice_process, resolve_duplicate_scan_root, run_care,
+    run_scan, scan_space_volume_with_options, signal_process, signal_process_group,
+    space_entry_size_only,
+    space_report_at, spotlight_status, survey_leftovers, trash_selected,
+    trash_threat as engine_trash_threat, volume_contains, computer_root, AccessStatus,
+    ExecutionControl, MonitorAnalytics, ProcessSignal, TelemetryStore,
+    ExtensionWatchDetector, ScanConfig, ScanEvent, SpaceProgress, SpaceReport,
 };
 use tokio::sync::mpsc;
 
@@ -157,10 +159,29 @@ pub fn start_care(mut state: Signal<AppState>) {
         let report = run_care(home).await;
         {
             let mut s = state.write();
+            if s.sample.is_none() {
+                let mem_pct = if report.sample.total_memory > 0 {
+                    report.sample.used_memory as f32 / report.sample.total_memory as f32
+                } else {
+                    0.0
+                };
+                crate::util::push_monitor_spark(
+                    &mut s.monitor_spark_cpu,
+                    report.sample.cpu_percent / 100.0,
+                );
+                crate::util::push_monitor_spark(&mut s.monitor_spark_mem, mem_pct);
+                s.sample = Some(report.sample.clone());
+            }
             s.access = report.access;
             s.care = Some(report);
         }
         finish_and_pump(state);
+        if state.read().screen == Screen::Care
+            && state.read().auto_poll_monitor
+            && !state.read().busy
+        {
+            sample_machine(state);
+        }
     });
 }
 
@@ -381,22 +402,7 @@ pub fn sample_machine(mut state: Signal<AppState>) {
     spawn(async move {
         let sample = tokio::task::spawn_blocking(machine_sample)
             .await
-            .unwrap_or_else(|_| MachineSample {
-                used_memory: 0,
-                total_memory: 0,
-                available_memory: 0,
-                cpu_percent: 0.0,
-                swap_used: 0,
-                swap_total: 0,
-                process_count: 0,
-                uptime_secs: 0,
-                load_avg_1m: 0.0,
-                load_avg_5m: 0.0,
-                load_avg_15m: 0.0,
-                boot_volume: VolumeBytes { total: 0, free: 0 },
-                top_cpu: Vec::new(),
-                top_mem: Vec::new(),
-            });
+            .unwrap_or_default();
         {
             let mut w = state.write();
             let mem_pct = if sample.total_memory > 0 {
@@ -412,6 +418,22 @@ pub fn sample_machine(mut state: Signal<AppState>) {
             crate::util::push_monitor_spark(&mut w.monitor_spark_cpu, sample.cpu_percent / 100.0);
             crate::util::push_monitor_spark(&mut w.monitor_spark_mem, mem_pct);
             crate::util::push_monitor_spark(&mut w.monitor_spark_swap, swap_pct);
+            crate::util::push_monitor_raw_spark(
+                &mut w.monitor_spark_net_rx,
+                sample.network.rx_bytes_per_sec as f32,
+            );
+            crate::util::push_monitor_raw_spark(
+                &mut w.monitor_spark_net_tx,
+                sample.network.tx_bytes_per_sec as f32,
+            );
+            crate::util::push_monitor_raw_spark(
+                &mut w.monitor_spark_disk_r,
+                sample.disk_read_bytes_per_sec as f32,
+            );
+            crate::util::push_monitor_raw_spark(
+                &mut w.monitor_spark_disk_w,
+                sample.disk_write_bytes_per_sec as f32,
+            );
             w.sample = Some(sample.clone());
             w.monitor_sampling = false;
         }
@@ -636,6 +658,175 @@ pub fn clear_monitor_history(mut state: Signal<AppState>) {
             refresh: None,
         });
         finish_and_pump(state);
+    });
+}
+
+pub fn inspect_process(mut state: Signal<AppState>, pid: u32) {
+    {
+        let mut w = state.write();
+        w.monitor_selected_pid = Some(pid);
+        w.monitor_detail_loading = true;
+    }
+    spawn(async move {
+        let detail = tokio::task::spawn_blocking(move || inspect_process_details(pid))
+            .await
+            .ok()
+            .flatten();
+        let mut w = state.write();
+        if w.monitor_selected_pid == Some(pid) {
+            w.monitor_process_detail = detail;
+            w.monitor_detail_loading = false;
+        }
+    });
+}
+
+pub fn request_signal_process(
+    mut state: Signal<AppState>,
+    pid: u32,
+    name: String,
+    signal: ProcessSignal,
+) {
+    match signal {
+        ProcessSignal::Term | ProcessSignal::Kill => {
+            let desc = if signal == ProcessSignal::Kill {
+                format!(
+                    "Force-kill \"{name}\" (PID {pid}) with SIGKILL?\nUnsaved work in this process will be lost immediately."
+                )
+            } else {
+                format!("Send SIGTERM to cleanly stop \"{name}\" (PID {pid})?")
+            };
+            state.write().confirm = Some(crate::state::Confirm {
+                heading: format!("{} · PID {pid}", signal.label()),
+                body: desc,
+                action: signal.label(),
+                kind: ConfirmKind::SignalProcess { pid, name, signal },
+            });
+        }
+        ProcessSignal::Stop | ProcessSignal::Cont | ProcessSignal::Hup => {
+            execute_signal_process(state, pid, name, signal);
+        }
+    }
+}
+
+pub fn execute_signal_process(
+    mut state: Signal<AppState>,
+    pid: u32,
+    name: String,
+    signal: ProcessSignal,
+) {
+    spawn(async move {
+        let res = tokio::task::spawn_blocking(move || signal_process(pid, signal))
+            .await
+            .unwrap_or_else(|e| Err(format!("Task error: {e}")));
+        let ok = res.is_ok();
+        let msg = match res {
+            Ok(text) => format!("{name} ({pid}): {text}"),
+            Err(err) => err,
+        };
+        {
+            let mut w = state.write();
+            w.notice = Some(Notice {
+                ok,
+                text: msg,
+                refresh: None,
+            });
+            if ok && matches!(signal, ProcessSignal::Term | ProcessSignal::Kill) && w.monitor_selected_pid == Some(pid) {
+                w.monitor_selected_pid = None;
+                w.monitor_process_detail = None;
+            }
+        }
+        if ok {
+            if matches!(signal, ProcessSignal::Stop | ProcessSignal::Cont | ProcessSignal::Hup)
+                && state.read().monitor_selected_pid == Some(pid)
+            {
+                inspect_process(state, pid);
+            }
+            sample_machine(state);
+        }
+    });
+}
+
+pub fn renice_monitor_process(mut state: Signal<AppState>, pid: u32, nice: i32) {
+    spawn(async move {
+        let res = tokio::task::spawn_blocking(move || renice_process(pid, nice))
+            .await
+            .unwrap_or_else(|e| Err(format!("Task error: {e}")));
+        let ok = res.is_ok();
+        let text = match res {
+            Ok(t) | Err(t) => t,
+        };
+        state.write().notice = Some(Notice {
+            ok,
+            text,
+            refresh: None,
+        });
+        if ok {
+            if state.read().monitor_selected_pid == Some(pid) {
+                inspect_process(state, pid);
+            }
+            sample_machine(state);
+        }
+    });
+}
+
+pub fn request_signal_group(
+    mut state: Signal<AppState>,
+    group_name: String,
+    pids: Vec<u32>,
+    signal: ProcessSignal,
+) {
+    let count = pids.len();
+    let desc = format!(
+        "Send {} to all {count} processes in \"{group_name}\"?",
+        signal.label()
+    );
+    state.write().confirm = Some(crate::state::Confirm {
+        heading: format!("{} · {group_name}", signal.label()),
+        body: desc,
+        action: signal.label(),
+        kind: ConfirmKind::SignalProcessGroup {
+            group_name,
+            pids,
+            signal,
+        },
+    });
+}
+
+pub fn execute_signal_group(
+    mut state: Signal<AppState>,
+    group_name: String,
+    pids: Vec<u32>,
+    signal: ProcessSignal,
+) {
+    spawn(async move {
+        let pids_for_clear = pids.clone();
+        let res = tokio::task::spawn_blocking(move || signal_process_group(&pids, signal))
+            .await
+            .unwrap_or_else(|e| Err(format!("Task error: {e}")));
+        let ok = res.is_ok();
+        let msg = match res {
+            Ok(text) => format!("{group_name}: {text}"),
+            Err(err) => err,
+        };
+        {
+            let mut w = state.write();
+            w.notice = Some(Notice {
+                ok,
+                text: msg,
+                refresh: None,
+            });
+            if ok {
+                if let Some(sel) = w.monitor_selected_pid {
+                    if pids_for_clear.contains(&sel) {
+                        w.monitor_selected_pid = None;
+                        w.monitor_process_detail = None;
+                    }
+                }
+            }
+        }
+        if ok {
+            sample_machine(state);
+        }
     });
 }
 
@@ -1189,6 +1380,16 @@ pub fn perform_confirm(state: Signal<AppState>, kind: ConfirmKind) {
             is_dmg,
         } => {
             install_update(state, tag, download_url, fallback_url, is_dmg);
+        }
+        ConfirmKind::SignalProcess { pid, name, signal } => {
+            execute_signal_process(state, pid, name, signal);
+        }
+        ConfirmKind::SignalProcessGroup {
+            group_name,
+            pids,
+            signal,
+        } => {
+            execute_signal_group(state, group_name, pids, signal);
         }
     }
 }

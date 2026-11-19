@@ -64,7 +64,7 @@ pub fn ClutterScreen(mut state: Signal<AppState>) -> Element {
         div { class: "toolbar",
             input {
                 class: "field",
-                style: "max-width: 320px;",
+                style: "flex: 1 1 240px; max-width: 460px; min-width: 180px;",
                 placeholder: "Filter downloads by name…",
                 value: "{filter}",
                 oninput: move |e| state.write().clutter_filter = e.value(),

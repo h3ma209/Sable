@@ -764,8 +764,10 @@ mod tests {
                 pid: 101,
                 cpu_percent: 12.0,
                 memory_bytes: 50_000_000,
+                ..ProcessSnap::default()
             }],
             top_mem: vec![],
+            ..MachineSample::default()
         };
         let id = store.record(&sample).unwrap();
         let hist = store.host_history(0, 10).unwrap();

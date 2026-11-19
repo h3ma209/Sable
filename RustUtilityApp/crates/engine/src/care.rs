@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::access::{folder_access, AccessStatus};
 use crate::apps::installed_app_count;
 use crate::cleanup::junk_roots;
-use crate::performance::{launch_agents, machine_summary_sample};
+use crate::performance::{launch_agents, machine_summary_sample, MachineSample};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CareState {
@@ -28,13 +28,14 @@ pub struct ModuleResult {
     pub summary: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CareReport {
     pub modules: Vec<ModuleResult>,
     pub access: AccessStatus,
     pub cleanup_bytes: u64,
     pub app_count: usize,
     pub agent_count: usize,
+    pub sample: MachineSample,
 }
 
 /// Fan-out across cleanup, protection access, performance, and applications.
@@ -52,22 +53,7 @@ pub async fn run_care(home: PathBuf) -> CareReport {
     let junk = junk.unwrap_or_default();
     let app_count = app_count.unwrap_or(0);
     let agents = agents.unwrap_or_default();
-    let sample = sample.unwrap_or(crate::performance::MachineSample {
-        used_memory: 0,
-        total_memory: 0,
-        available_memory: 0,
-        cpu_percent: 0.0,
-        swap_used: 0,
-        swap_total: 0,
-        process_count: 0,
-        uptime_secs: 0,
-        load_avg_1m: 0.0,
-        load_avg_5m: 0.0,
-        load_avg_15m: 0.0,
-        boot_volume: crate::performance::VolumeBytes { total: 0, free: 0 },
-        top_cpu: Vec::new(),
-        top_mem: Vec::new(),
-    });
+    let sample = sample.unwrap_or_default();
     let cache_bytes = junk.iter().fold(0u64, |sum, root| sum.saturating_add(root.bytes));
     let access = folder_access(Path::new("/Library/Application Support"));
     CareReport {
@@ -103,5 +89,6 @@ pub async fn run_care(home: PathBuf) -> CareReport {
                 summary: format!("{} apps", app_count),
             },
         ],
+        sample,
     }
 }

@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstalledApp {
@@ -195,6 +197,15 @@ fn resolve_app_icon_with(
     app_name: &str,
     read_key: &dyn Fn(&str) -> Option<String>,
 ) -> Option<String> {
+    resolve_app_icon_inner(app_path, app_name, read_key, true)
+}
+
+fn resolve_app_icon_inner(
+    app_path: &Path,
+    app_name: &str,
+    read_key: &dyn Fn(&str) -> Option<String>,
+    allow_sips: bool,
+) -> Option<String> {
     let resources = app_path.join("Contents/Resources");
     let mut candidates = Vec::new();
 
@@ -218,7 +229,7 @@ fn resolve_app_icon_with(
 
     for candidate in &candidates {
         if candidate.is_file() {
-            if let Some(data_url) = extract_icns_png(candidate) {
+            if let Some(data_url) = extract_icns_png_inner(candidate, allow_sips) {
                 return Some(data_url);
             }
         }
@@ -231,7 +242,7 @@ fn resolve_app_icon_with(
             if path.extension().and_then(|e| e.to_str()) == Some("icns") {
                 let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
                 if stem.contains("icon") || stem.contains(&app_name.to_lowercase()) {
-                    if let Some(data_url) = extract_icns_png(&path) {
+                    if let Some(data_url) = extract_icns_png_inner(&path, allow_sips) {
                         return Some(data_url);
                     }
                 }
@@ -241,7 +252,7 @@ fn resolve_app_icon_with(
             }
         }
         if let Some(fallback) = fallback_icns {
-            if let Some(data_url) = extract_icns_png(&fallback) {
+            if let Some(data_url) = extract_icns_png_inner(&fallback, allow_sips) {
                 return Some(data_url);
             }
         }
@@ -250,7 +261,40 @@ fn resolve_app_icon_with(
     None
 }
 
-fn extract_icns_png(icns_path: &Path) -> Option<String> {
+/// Cached in-memory app bundle icon resolver (XML plist + embedded PNG chunks, zero subprocesses).
+pub fn cached_bundle_icon(app_path: &Path) -> Option<String> {
+    static ICON_CACHE: OnceLock<Mutex<HashMap<PathBuf, Option<String>>>> = OnceLock::new();
+    let cache = ICON_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = cache.lock() {
+        if let Some(hit) = guard.get(app_path) {
+            return hit.clone();
+        }
+    }
+
+    let plist = app_path.join("Contents/Info.plist");
+    let plist_text = std::fs::read(&plist)
+        .ok()
+        .and_then(|b| if !b.starts_with(b"bplist") { String::from_utf8(b).ok() } else { None });
+    let read_key = |key: &str| -> Option<String> {
+        plist_text.as_deref().and_then(|xml| xml_plist_string(xml, key))
+    };
+    let app_name = read_key("CFBundleName")
+        .or_else(|| read_key("CFBundleDisplayName"))
+        .unwrap_or_else(|| {
+            app_path
+                .file_stem()
+                .and_then(|n| n.to_str())
+                .unwrap_or("App")
+                .to_string()
+        });
+    let icon = resolve_app_icon_inner(app_path, &app_name, &read_key, false);
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(app_path.to_path_buf(), icon.clone());
+    }
+    icon
+}
+
+fn extract_icns_png_inner(icns_path: &Path, allow_sips: bool) -> Option<String> {
     let bytes = std::fs::read(icns_path).ok()?;
     if bytes.len() < 8 || &bytes[0..4] != b"icns" {
         return None;
@@ -296,7 +340,11 @@ fn extract_icns_png(icns_path: &Path) -> Option<String> {
         return Some(format!("data:image/png;base64,{}", base64_encode(png)));
     }
 
-    convert_icns_with_sips(icns_path)
+    if allow_sips {
+        convert_icns_with_sips(icns_path)
+    } else {
+        None
+    }
 }
 
 fn convert_icns_with_sips(icns_path: &Path) -> Option<String> {

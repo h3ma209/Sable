@@ -54,6 +54,17 @@ pub fn reveal(path: &Path) {
     let _ = Command::new("open").arg("-R").arg(path).spawn();
 }
 
+pub fn copy_to_clipboard(text: &str) {
+    use std::io::Write;
+    use std::process::Stdio;
+    if let Ok(mut child) = Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        let _ = child.wait();
+    }
+}
+
 #[allow(dead_code)]
 pub fn open_url(url: &str) {
     let _ = Command::new("open").arg(url).spawn();
@@ -182,12 +193,61 @@ pub fn space_category_style(is_dir: bool, name: &str) -> (&'static str, &'static
     }
 }
 
+pub fn format_rate(bytes_per_sec: u64) -> String {
+    format!("{}/s", format_bytes(bytes_per_sec))
+}
+
+pub fn format_proc_time(secs: u64) -> String {
+    if secs < 3600 {
+        format!("{:02}:{:02}", secs / 60, secs % 60)
+    } else if secs < 86_400 {
+        format!("{}h {:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
+    } else {
+        format!("{}d {:02}h", secs / 86_400, (secs % 86_400) / 3600)
+    }
+}
+
 pub fn push_monitor_spark(buf: &mut Vec<f32>, value: f32) {
     buf.push(value.clamp(0.0, 1.0));
     const MAX: usize = 96;
     if buf.len() > MAX {
         buf.drain(0..buf.len() - MAX);
     }
+}
+
+pub fn push_monitor_raw_spark(buf: &mut Vec<f32>, value: f32) {
+    buf.push(value.max(0.0));
+    const MAX: usize = 96;
+    if buf.len() > MAX {
+        buf.drain(0..buf.len() - MAX);
+    }
+}
+
+pub fn monitor_dynamic_sparkline_points(
+    values: &[f32],
+    width: f32,
+    height: f32,
+    min_ceil: f32,
+) -> String {
+    if values.is_empty() {
+        return String::new();
+    }
+    let max = values
+        .iter()
+        .cloned()
+        .fold(min_ceil, |a, b| a.max(b))
+        .max(min_ceil);
+    let step = width / (values.len().saturating_sub(1).max(1) as f32);
+    values
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let x = i as f32 * step;
+            let y = height - (v / max * height * 0.90 + height * 0.05);
+            format!("{x:.1},{y:.1}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub fn monitor_chart_max(values: &[f32], floor: f32) -> f32 {
@@ -238,6 +298,7 @@ pub fn monitor_sparkline_points(values: &[f32], width: f32, height: f32) -> Stri
         .join(" ")
 }
 
+#[allow(dead_code)]
 pub fn monitor_ring_color(class: &str) -> &'static str {
     match class {
         "danger" => "#ff6b6b",

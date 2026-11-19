@@ -25,7 +25,7 @@ mod telemetry;
 mod threats;
 
 pub use access::{folder_access, AccessStatus};
-pub use apps::{installed_apps, survey_leftovers, InstalledApp, LeftoverHit};
+pub use apps::{cached_bundle_icon, installed_apps, survey_leftovers, InstalledApp, LeftoverHit};
 pub use care::{run_care, CareReport, CareState, ModuleResult};
 pub use cleanup::{
     dev_junk_roots, directory_size, general_junk_candidates, junk_candidates, junk_roots,
@@ -40,8 +40,11 @@ pub use enumerate::{walk, Chunk, WalkOptions};
 pub use error::ScanError;
 pub use event::{Detection, ScanEvent};
 pub use performance::{
-    flush_dns_cache, launch_agents, machine_sample, reindex_spotlight, spotlight_status, LaunchAgent,
-    MachineSample, ProcessSnap, VolumeBytes,
+    flush_dns_cache, group_processes, inspect_process_details, launch_agents, machine_sample,
+    machine_summary_sample, reindex_spotlight, renice_process, signal_process,
+    signal_process_group, spotlight_status, BatterySnap, CoreSnap, DiskVolumeSnap, LaunchAgent,
+    MachineSample, MemoryBreakdown, NetInterfaceSnap, NetworkSnap, ProcessDetail, ProcessGroup,
+    ProcessGroupMember, ProcessSignal, ProcessSnap, ThermalSnap, VolumeBytes,
 };
 pub use snapshots::{list_local_snapshots, LocalSnapshot, SnapshotReport};
 pub use telemetry::{

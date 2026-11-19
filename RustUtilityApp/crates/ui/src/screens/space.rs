@@ -120,10 +120,9 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
                     span { class: "folder-pill-path", "/" }
                 }
             }
-            div { style: "display: flex; gap: 8px; margin-left: auto; align-items: center;",
+            div { class: "space-inputs",
                 input {
-                    class: "field",
-                    style: "max-width: 250px; font-size: 11px;",
+                    class: "field field-exclude",
                     placeholder: "Exclude (size only): node_modules…",
                     title: "Folder names (basename match). Rescan after editing. Size counted, no map or drill-in.",
                     value: "{space_exclude_dirs}",
@@ -131,8 +130,7 @@ pub fn SpaceScreen(mut state: Signal<AppState>) -> Element {
                     oninput: move |e| state.write().space_exclude_dirs = e.value(),
                 }
                 input {
-                    class: "field",
-                    style: "max-width: 150px; font-size: 11px;",
+                    class: "field field-filter",
                     placeholder: "Filter items…",
                     value: "{filter}",
                     oninput: move |e| state.write().space_filter = e.value(),

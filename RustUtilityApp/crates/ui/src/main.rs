@@ -56,13 +56,15 @@ fn App() -> Element {
 
     use_future(move || async move {
         loop {
-            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+            let poll_ms = state.read().monitor_poll_ms.clamp(500, 10_000);
+            tokio::time::sleep(std::time::Duration::from_millis(poll_ms)).await;
             let want_sample = {
                 let s = state.read();
                 (s.monitor_log_enabled
-                    || (s.screen == Screen::Assistant
-                        && s.auto_poll_monitor
-                        && s.monitor_tab == 0))
+                    || (s.auto_poll_monitor
+                        && (s.screen == Screen::Care
+                            || (s.screen == Screen::Assistant
+                                && (s.monitor_tab == 0 || s.monitor_tab == 1)))))
                     && !s.busy
             };
             if want_sample {

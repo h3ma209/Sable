@@ -1,18 +1,17 @@
 use dioxus::prelude::*;
 
 use crate::actions::{
-    clear_monitor_history, export_monitor_csv, focus_monitor_process, load_monitor_analytics,
-    load_monitor_history, select_monitor_snapshot, toggle_monitor_logging,
+    clear_monitor_history, export_monitor_csv, focus_monitor_process, inspect_process,
+    load_monitor_analytics, load_monitor_history, sample_machine, select_monitor_snapshot,
+    toggle_monitor_logging,
 };
 use crate::components::{
-    MonitorAnalyticsBoard, MonitorHealthBadge, MonitorHistoryRow, MonitorProcessDeck,
-    MonitorProcessHistoryRows, MonitorRing, MonitorSparkStrip, MonitorStatTile, NoticeBanner,
-    PageHeader, Safety,
+    MonitorAnalyticsBoard, MonitorCoreMatrix, MonitorGroupedLeaders, MonitorHistoryRow,
+    MonitorOverviewHero, MonitorProcessHistoryRows, MonitorProcessWorkspace, MonitorSmartAlerts,
+    MonitorSparkStrip, MonitorStorageThermalRow, NoticeBanner, PageHeader, Safety,
 };
-use crate::state::{AppState, Screen};
-use crate::util::{
-    format_bytes, format_count, format_unix_time, format_uptime, monitor_health_score,
-};
+use crate::state::{AppState, ProcessViewMode, Screen};
+use crate::util::{format_bytes, format_count, format_unix_time};
 
 #[component]
 pub fn AssistantScreen(mut state: Signal<AppState>) -> Element {
@@ -22,10 +21,14 @@ pub fn AssistantScreen(mut state: Signal<AppState>) -> Element {
     let auto_poll = state.read().auto_poll_monitor;
     let tab = state.read().monitor_tab;
     let logging = state.read().monitor_log_enabled;
+    let poll_ms = state.read().monitor_poll_ms;
     let summary = state.read().monitor_summary.clone();
     let spark_cpu = state.read().monitor_spark_cpu.clone();
     let spark_mem = state.read().monitor_spark_mem.clone();
-    let spark_swap = state.read().monitor_spark_swap.clone();
+    let spark_net_rx = state.read().monitor_spark_net_rx.clone();
+    let spark_net_tx = state.read().monitor_spark_net_tx.clone();
+    let spark_disk_r = state.read().monitor_spark_disk_r.clone();
+    let spark_disk_w = state.read().monitor_spark_disk_w.clone();
     let history = state.read().monitor_history.clone();
     let range = state.read().monitor_range_hours;
     let selected = state.read().monitor_selected_host_id;
@@ -36,7 +39,7 @@ pub fn AssistantScreen(mut state: Signal<AppState>) -> Element {
     let analytics_loading = state.read().monitor_analytics_loading;
 
     use_effect(move || {
-        let need = state.read().monitor_tab == 2
+        let need = state.read().monitor_tab == 3
             && state.read().monitor_analytics.is_none()
             && !state.read().monitor_analytics_loading;
         if need {
@@ -52,7 +55,7 @@ pub fn AssistantScreen(mut state: Signal<AppState>) -> Element {
                     disabled: busy,
                     onclick: move |_| {
                         state.write().monitor_range_hours = hours;
-                        if state.read().monitor_tab == 2 {
+                        if state.read().monitor_tab == 3 {
                             load_monitor_analytics(state);
                         } else {
                             load_monitor_history(state);
@@ -64,10 +67,19 @@ pub fn AssistantScreen(mut state: Signal<AppState>) -> Element {
         }
     };
 
+    let proc_count = sample.as_ref().map(|s| s.process_count).unwrap_or(0);
+    let group_count = sample.as_ref().map(|s| s.groups.len()).unwrap_or(0);
+    let poll_sec = (poll_ms as f32 / 1000.0).max(0.5);
+    let poll_label = if (poll_sec - poll_sec.round()).abs() < 0.05 {
+        format!("{}s", poll_sec.round() as u64)
+    } else {
+        format!("{poll_sec:.1}s")
+    };
+
     rsx! {
         PageHeader {
             screen: Screen::Assistant,
-            subtitle: "Live vitals, SQLite history, and analytics across CPU, RAM, swap, disk, and processes.",
+            subtitle: "Per-core CPU & P/E topology, macOS memory pressure, network & disk rates, interactive process tree & controls.",
             safety: Safety::ReadOnly,
             action_label: Some(if auto_poll { "Pause Live".into() } else { "Resume Live".into() }),
             action_enabled: !busy,
@@ -83,31 +95,49 @@ pub fn AssistantScreen(mut state: Signal<AppState>) -> Element {
                 button {
                     class: if tab == 0 { "tab active" } else { "tab" },
                     onclick: move |_| state.write().monitor_tab = 0,
-                    "Live"
+                    "Overview"
                 }
                 button {
                     class: if tab == 1 { "tab active" } else { "tab" },
-                    onclick: move |_| {
-                        state.write().monitor_tab = 1;
-                        load_monitor_history(state);
-                    },
-                    "History"
+                    onclick: move |_| state.write().monitor_tab = 1,
+                    if proc_count > 0 {
+                        "Processes · {group_count} groups / {proc_count}"
+                    } else {
+                        "Processes"
+                    }
                 }
                 button {
                     class: if tab == 2 { "tab active" } else { "tab" },
                     onclick: move |_| {
                         state.write().monitor_tab = 2;
+                        load_monitor_history(state);
+                    },
+                    "History"
+                }
+                button {
+                    class: if tab == 3 { "tab active" } else { "tab" },
+                    onclick: move |_| {
+                        state.write().monitor_tab = 3;
                         load_monitor_analytics(state);
                     },
                     "Analytics"
                 }
             }
-            button {
-                class: if logging { "monitor-log-btn on" } else { "monitor-log-btn" },
-                disabled: busy,
-                onclick: move |_| toggle_monitor_logging(state),
-                span { class: "monitor-log-dot" }
-                if logging { "Logging on" } else { "Enable history" }
+            div { style: "display: flex; align-items: center; gap: 8px; flex-wrap: wrap;",
+                button {
+                    class: "btn btn-ghost",
+                    disabled: monitor_sampling || busy,
+                    title: "Take an immediate telemetry sample",
+                    onclick: move |_| sample_machine(state),
+                    "Sample Now"
+                }
+                button {
+                    class: if logging { "monitor-log-btn on" } else { "monitor-log-btn" },
+                    disabled: busy,
+                    onclick: move |_| toggle_monitor_logging(state),
+                    span { class: "monitor-log-dot" }
+                    if logging { "Logging on" } else { "Enable history" }
+                }
             }
         }
 
@@ -117,116 +147,75 @@ pub fn AssistantScreen(mut state: Signal<AppState>) -> Element {
                 span { "{format_count(sum.process_row_count)} process rows" }
                 span { "{format_bytes(sum.db_bytes)} database" }
                 if logging {
-                    span { class: "monitor-meta-live", "recording every 2s" }
+                    span { class: "monitor-meta-live", "recording every {poll_label}" }
                 }
             }
         }
 
         if tab == 0 {
             if let Some(sample) = sample {
-                {
-                    let mem_pct = if sample.total_memory > 0 {
-                        sample.used_memory as f32 / sample.total_memory as f32
-                    } else {
-                        0.0
-                    };
-                    let cpu = (sample.cpu_percent / 100.0).clamp(0.0, 1.0);
-                    let swap_pct = if sample.swap_total > 0 {
-                        sample.swap_used as f32 / sample.swap_total as f32
-                    } else {
-                        0.0
-                    };
-                    let disk_used_pct = if sample.boot_volume.total > 0 {
-                        1.0 - (sample.boot_volume.free as f32 / sample.boot_volume.total as f32)
-                    } else {
-                        0.0
-                    };
-                    let health = monitor_health_score(cpu, mem_pct, swap_pct);
-                    let disk_free = format_bytes(sample.boot_volume.free);
-                    let disk_total = format_bytes(sample.boot_volume.total);
-                    rsx! {
-                        div { class: "monitor-live-header",
-                            MonitorHealthBadge { score: health }
-                            div { class: "monitor-stat-grid",
-                                MonitorStatTile {
-                                    title: "Processes",
-                                    value: format_count(sample.process_count as u64),
-                                    hint: String::from("running now"),
-                                }
-                                MonitorStatTile {
-                                    title: "Uptime",
-                                    value: format_uptime(sample.uptime_secs),
-                                    hint: String::from("since last boot"),
-                                }
-                                MonitorStatTile {
-                                    title: "Load avg",
-                                    value: format!("{:.2}", sample.load_avg_1m),
-                                    hint: format!("5m {:.2} · 15m {:.2}", sample.load_avg_5m, sample.load_avg_15m),
-                                }
-                                MonitorStatTile {
-                                    title: "Boot volume",
-                                    value: format!("{:.0}% full", disk_used_pct * 100.0),
-                                    hint: format!("{disk_free} free of {disk_total}"),
-                                }
-                                MonitorStatTile {
-                                    title: "Available RAM",
-                                    value: format_bytes(sample.available_memory),
-                                    hint: String::from("ready for apps"),
-                                }
-                            }
-                        }
-                        div { class: "monitor-hero",
-                            div { class: "monitor-pulse", aria_hidden: "true" }
-                            div { class: "monitor-rings",
-                                MonitorRing {
-                                    label: "CPU",
-                                    fraction: cpu,
-                                    caption: String::from("Processor load"),
-                                    display_value: format!("{:.0}%", sample.cpu_percent),
-                                }
-                                MonitorRing {
-                                    label: "RAM",
-                                    fraction: mem_pct,
-                                    caption: format!(
-                                        "{} / {}",
-                                        format_bytes(sample.used_memory),
-                                        format_bytes(sample.total_memory)
-                                    ),
-                                    display_value: format!("{:.0}%", mem_pct * 100.0),
-                                }
-                                MonitorRing {
-                                    label: "SWAP",
-                                    fraction: swap_pct,
-                                    caption: if sample.swap_total > 0 {
-                                        format!(
-                                            "{} / {}",
-                                            format_bytes(sample.swap_used),
-                                            format_bytes(sample.swap_total)
-                                        )
-                                    } else {
-                                        "—".into()
-                                    },
-                                    display_value: format!("{:.0}%", swap_pct * 100.0),
-                                }
-                            }
-                        }
-                        div { class: "monitor-spark-grid",
-                            MonitorSparkStrip { title: "CPU", values: spark_cpu, stroke: "#1ed760" }
-                            MonitorSparkStrip { title: "Memory", values: spark_mem, stroke: "#5bb8ff" }
-                            MonitorSparkStrip { title: "Swap", values: spark_swap, stroke: "#c084fc" }
-                        }
-                        MonitorProcessDeck { sample: sample.clone() }
-                    }
+                MonitorOverviewHero {
+                    sample: sample.clone(),
+                    cpu_spark: spark_cpu,
+                    mem_spark: spark_mem,
+                    net_rx: spark_net_rx,
+                    net_tx: spark_net_tx,
+                    disk_r: spark_disk_r,
+                    disk_w: spark_disk_w,
                 }
+                MonitorSmartAlerts {
+                    sample: sample.clone(),
+                    on_open_group: EventHandler::new(move |(gkey, pid): (String, u32)| {
+                        {
+                            let mut w = state.write();
+                            w.monitor_tab = 1;
+                            w.monitor_proc_view = ProcessViewMode::Grouped;
+                            w.monitor_expanded_groups.insert(gkey);
+                        }
+                        inspect_process(state, pid);
+                    }),
+                }
+                MonitorCoreMatrix {
+                    sample: sample.clone(),
+                    expanded: state.read().monitor_cores_expanded,
+                    on_toggle: EventHandler::new(move |_| {
+                        let cur = state.read().monitor_cores_expanded;
+                        state.write().monitor_cores_expanded = !cur;
+                    }),
+                }
+                MonitorGroupedLeaders {
+                    sample: sample.clone(),
+                    on_open_group: EventHandler::new(move |(gkey, pid): (String, u32)| {
+                        {
+                            let mut w = state.write();
+                            w.monitor_tab = 1;
+                            w.monitor_proc_view = ProcessViewMode::Grouped;
+                            w.monitor_expanded_groups.insert(gkey);
+                        }
+                        inspect_process(state, pid);
+                    }),
+                }
+                MonitorStorageThermalRow { sample: sample.clone() }
             } else if monitor_sampling {
-                div { class: "card loading monitor-loading", div { class: "spinner" } "Sampling…" }
+                div { class: "card loading monitor-loading", div { class: "spinner" } "Sampling system telemetry…" }
             } else {
                 div { class: "card empty",
                     h3 { "Waiting for first sample" }
-                    p { "Live mode polls every 2 seconds." }
+                    p { "Live mode polls every {poll_label}." }
                 }
             }
         } else if tab == 1 {
+            if let Some(sample) = sample {
+                MonitorProcessWorkspace { state, sample: sample.clone() }
+            } else if monitor_sampling {
+                div { class: "card loading monitor-loading", div { class: "spinner" } "Loading processes…" }
+            } else {
+                div { class: "card empty",
+                    h3 { "No process snapshot yet" }
+                    p { "Sampling live processes every {poll_label}." }
+                }
+            }
+        } else if tab == 2 {
             div { class: "monitor-history-panel",
                 {range_chips}
                 div { class: "monitor-range-row",

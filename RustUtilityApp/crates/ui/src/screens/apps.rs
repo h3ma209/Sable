@@ -57,7 +57,7 @@ pub fn AppsScreen(mut state: Signal<AppState>) -> Element {
             div { class: "toolbar",
                 input {
                     class: "field",
-                    style: "max-width: 320px;",
+                    style: "flex: 1 1 240px; max-width: 460px; min-width: 180px;",
                     placeholder: "Filter by name or bundle id",
                     value: "{filter}",
                     oninput: move |e| state.write().app_filter = e.value(),
