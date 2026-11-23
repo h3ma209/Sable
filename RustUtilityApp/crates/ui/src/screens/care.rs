@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use engine::{MachineSample, ProcessGroup};
 
-use crate::actions::{inspect_process, run_checked_care};
+use crate::actions::{inspect_process, run_checked_care, sample_machine};
 use crate::components::{
     cpu_heat_class, format_core_topology, mem_heat_class, GroupAvatar, MonitorHealthBadge,
     NoticeBanner,
@@ -74,6 +74,7 @@ pub fn CareScreen(mut state: Signal<AppState>) -> Element {
     .filter(|s| picks.contains(s) && !(**s == Screen::Malware && threats_clear))
     .count();
 
+    let auto_poll = state.read().auto_poll_monitor;
     let loading_initial = !care_loaded && sample.is_none() && busy;
 
     rsx! {
@@ -85,7 +86,10 @@ pub fn CareScreen(mut state: Signal<AppState>) -> Element {
             }
         } else {
             {
-                let snap = sample.unwrap_or_default();
+                let mut snap = sample.unwrap_or_default();
+                let groups = std::mem::take(&mut snap.groups);
+                let group_count = groups.len();
+                snap.processes.clear();
                 rsx! {
                     div { class: "home-command-center",
                         HomeHeader {
@@ -94,6 +98,7 @@ pub fn CareScreen(mut state: Signal<AppState>) -> Element {
                             age: age.clone(),
                             busy,
                             selected,
+                            auto_poll,
                         }
                         div { class: "home-bento",
                             HomeStorageCard {
@@ -106,15 +111,18 @@ pub fn CareScreen(mut state: Signal<AppState>) -> Element {
                             }
                             HomePulseCard {
                                 state,
-                                sample: snap.clone(),
+                                sample: snap,
+                                group_count,
                                 spark_cpu,
                                 spark_mem,
+                                auto_poll,
                             }
                         }
                         div { class: "home-lower-grid",
                             HomeActiveAppsCard {
                                 state,
-                                sample: snap,
+                                groups,
+                                auto_poll,
                             }
                             HomeAuditQueueCard {
                                 state,
@@ -141,6 +149,7 @@ fn HomeHeader(
     age: String,
     busy: bool,
     selected: usize,
+    auto_poll: bool,
 ) -> Element {
     let total_mem = sample.total_memory.max(1) as f64;
     let mem_frac = (sample.used_memory as f64 / total_mem).clamp(0.0, 1.0) as f32;
@@ -176,7 +185,19 @@ fn HomeHeader(
         header { class: "home-header",
             div { class: "home-identity",
                 div { class: "home-eyebrow",
-                    span { class: "home-live-dot" }
+                    span { class: if auto_poll { "home-live-dot" } else { "home-live-dot off" } }
+                    button {
+                        class: if auto_poll { "home-monitor-pill on" } else { "home-monitor-pill off" },
+                        title: if auto_poll { "Pause live monitoring" } else { "Start live monitoring" },
+                        onclick: move |_| {
+                            let next = !state.read().auto_poll_monitor;
+                            state.write().auto_poll_monitor = next;
+                            if next {
+                                sample_machine(state);
+                            }
+                        },
+                        if auto_poll { "Monitor: Live" } else { "Monitor: Off · Start" }
+                    }
                     span { class: "home-chip-brand", "{cpu_label}" }
                     if !topo.is_empty() {
                         span { class: "monitor-topo-pill", "{topo}" }
@@ -341,8 +362,10 @@ fn HomeStorageCard(
 fn HomePulseCard(
     mut state: Signal<AppState>,
     sample: MachineSample,
+    group_count: usize,
     spark_cpu: Vec<f32>,
     spark_mem: Vec<f32>,
+    auto_poll: bool,
 ) -> Element {
     let total_mem = sample.total_memory.max(1) as f64;
     let mem_pct = (sample.used_memory as f64 / total_mem * 100.0).clamp(0.0, 100.0) as f32;
@@ -362,16 +385,35 @@ fn HomePulseCard(
             div { class: "home-card-head",
                 div {
                     span { class: "home-card-title", "Live Telemetry" }
-                    span { class: "home-card-sub", "Real-time host stats" }
+                    span { class: "home-card-sub",
+                        if auto_poll {
+                            "Real-time host stats"
+                        } else {
+                            "Monitoring off · startup snapshot"
+                        }
+                    }
                 }
-                button {
-                    class: "home-link-btn",
-                    onclick: move |_| {
-                        let mut w = state.write();
-                        w.monitor_tab = 0;
-                        w.try_go(Screen::Assistant);
-                    },
-                    "System Monitor →"
+                div { class: "home-head-controls",
+                    button {
+                        class: "home-link-btn",
+                        onclick: move |_| {
+                            let next = !state.read().auto_poll_monitor;
+                            state.write().auto_poll_monitor = next;
+                            if next {
+                                sample_machine(state);
+                            }
+                        },
+                        if auto_poll { "Pause" } else { "Start Live" }
+                    }
+                    button {
+                        class: "home-link-btn",
+                        onclick: move |_| {
+                            let mut w = state.write();
+                            w.monitor_tab = 0;
+                            w.try_go(Screen::Assistant);
+                        },
+                        "System Monitor →"
+                    }
                 }
             }
 
@@ -433,14 +475,14 @@ fn HomePulseCard(
                 div { class: "home-pulse-tile",
                     div { class: "home-pulse-top",
                         span { class: "home-pulse-k", "Activity" }
-                        if !sample.groups.is_empty() {
-                            span { class: "home-pulse-v", "{format_count(sample.groups.len() as u64)} groups" }
+                        if group_count > 0 {
+                            span { class: "home-pulse-v", "{format_count(group_count as u64)} groups" }
                         } else {
                             span { class: "home-pulse-v", "Load {sample.load_avg_1m:.2}" }
                         }
                     }
                     div { class: "home-pulse-sub",
-                        if !sample.groups.is_empty() {
+                        if group_count > 0 {
                             "{format_count(sample.process_count as u64)} procs · Load {sample.load_avg_1m:.2}"
                         } else {
                             "5m {sample.load_avg_5m:.2} · {format_bytes(sample.available_memory)} avail"
@@ -453,11 +495,14 @@ fn HomePulseCard(
 }
 
 #[component]
-fn HomeActiveAppsCard(mut state: Signal<AppState>, sample: MachineSample) -> Element {
+fn HomeActiveAppsCard(
+    mut state: Signal<AppState>,
+    mut groups: Vec<ProcessGroup>,
+    auto_poll: bool,
+) -> Element {
     let mut sort_by_cpu = use_signal(|| false);
     let cpu_mode = *sort_by_cpu.read();
 
-    let mut groups: Vec<ProcessGroup> = sample.groups;
     if cpu_mode {
         groups.sort_by(|a, b| {
             b.cpu_percent
@@ -511,8 +556,20 @@ fn HomeActiveAppsCard(mut state: Signal<AppState>, sample: MachineSample) -> Ele
 
             if groups.is_empty() {
                 div { class: "home-apps-empty",
-                    div { class: "spinner" }
-                    "Sampling active apps…"
+                    if auto_poll {
+                        div { class: "spinner" }
+                        span { "Sampling active apps…" }
+                    } else {
+                        span { "Live monitoring is off — enable it to inspect active app consumers." }
+                        button {
+                            class: "btn btn-secondary",
+                            onclick: move |_| {
+                                state.write().auto_poll_monitor = true;
+                                sample_machine(state);
+                            },
+                            "Start Live Monitor"
+                        }
+                    }
                 }
             } else {
                 div { class: "home-consumer-list",

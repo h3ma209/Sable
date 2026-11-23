@@ -56,12 +56,23 @@ fn App() -> Element {
 
     use_future(move || async move {
         loop {
-            let poll_ms = state.read().monitor_poll_ms.clamp(500, 10_000);
+            let poll_ms = {
+                let s = state.read();
+                let base = s.monitor_poll_ms.clamp(500, 10_000);
+                if s.screen == Screen::Care {
+                    base.max(4000)
+                } else {
+                    base
+                }
+            };
             tokio::time::sleep(std::time::Duration::from_millis(poll_ms)).await;
+            let win = dioxus::desktop::window();
+            let visible = win.is_visible() && !win.is_minimized();
             let want_sample = {
                 let s = state.read();
                 (s.monitor_log_enabled
-                    || (s.auto_poll_monitor
+                    || (visible
+                        && s.auto_poll_monitor
                         && (s.screen == Screen::Care
                             || (s.screen == Screen::Assistant
                                 && (s.monitor_tab == 0 || s.monitor_tab == 1)))))

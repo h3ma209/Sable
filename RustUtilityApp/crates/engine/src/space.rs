@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::os::darwin::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -35,9 +35,9 @@ struct PathFilter {
 static SPACE_SCAN_SERIAL: Mutex<()> = Mutex::new(());
 
 /// Stop mapping individual children deeper than this (folder still gets total size via fast_dir_sum).
-const SPACE_MAP_MAX_DEPTH: usize = 32;
+const SPACE_MAP_MAX_DEPTH: usize = 18;
 /// Cap mapped directory nodes so home / “This Mac” scans stay bounded in memory.
-const SPACE_MAP_MAX_DIRECTORY_NODES: usize = 300_000;
+const SPACE_MAP_MAX_DIRECTORY_NODES: usize = 200_000;
 
 /// Always size-only — never map individual children (merged with the UI exclude field).
 pub const DEFAULT_SPACE_SHALLOW_DIR_NAMES: &[&str] = &[
@@ -85,13 +85,11 @@ pub struct SpaceEntity {
     pub children: Vec<SpaceEntity>,
 }
 
-/// One volume scan. Navigation reuses `root` and only remaps immediate children.
+/// One volume scan. Navigation reuses `root` and walks path components without a duplicate HashMap.
 #[derive(Clone, Debug)]
 pub struct SpaceVolumeScan {
     pub scan_root: PathBuf,
     root: SpaceEntity,
-    /// Child-index path from `root`. Empty vec is the scan root. No tree walk on open.
-    lookup: HashMap<PathBuf, Vec<usize>>,
 }
 
 /// One level in the UI. Sizes include descendants; no nested `children` in the list row.
@@ -331,12 +329,7 @@ pub async fn scan_space_volume_with_options(
 }
 
 fn new_volume(scan_root: PathBuf, root: SpaceEntity) -> SpaceVolumeScan {
-    let lookup = build_lookup(&root);
-    SpaceVolumeScan {
-        scan_root,
-        root,
-        lookup,
-    }
+    SpaceVolumeScan { scan_root, root }
 }
 
 /// One folder already in the scanned tree. Children stay in the tree; the UI borrows them.
@@ -605,6 +598,7 @@ fn build_root_entity(
     let mut children = build_children(entries, root_dev, task, &seen, tracker, 0);
     children.sort_by(|a, b| b.bytes.cmp(&a.bytes));
     children.retain(|node| node.bytes > 0 || node.is_directory);
+    children.shrink_to_fit();
     let bytes = children.iter().fold(0u64, |sum, child| sum.saturating_add(child.bytes));
     let leaves = children.iter().fold(0u64, |sum, child| sum.saturating_add(child.leaves));
     tracker.finish(bytes);
@@ -776,6 +770,8 @@ fn build_entity(
         let entries = directory_entries(task, &path);
         let mut children = build_children(entries, root_dev, task, seen, tracker, depth);
         children.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+        children.retain(|node| node.bytes > 0 || node.is_directory);
+        children.shrink_to_fit();
         let bytes = children.iter().fold(0u64, |sum, child| sum.saturating_add(child.bytes));
         let leaves = children.iter().fold(0u64, |sum, child| sum.saturating_add(child.leaves));
         return Some(SpaceEntity {
@@ -878,73 +874,31 @@ fn path_aliases(path: &Path) -> Vec<PathBuf> {
     aliases
 }
 
-fn insert_lookup_aliases(
-    node: &SpaceEntity,
-    index: &[usize],
-    lookup: &mut HashMap<PathBuf, Vec<usize>>,
-    home: &Path,
-    data_home: &Path,
-    computer: &Path,
-) {
-    if !node.is_directory {
-        return;
-    }
-    let mut aliases = vec![node.path.clone()];
-    if !home.as_os_str().is_empty() {
-        if let Ok(rest) = node.path.strip_prefix(home) {
-            push_alias(&mut aliases, data_home.join(rest));
-        } else if let Ok(rest) = node.path.strip_prefix(data_home) {
-            push_alias(&mut aliases, home.join(rest));
-        }
-    }
-    if node.path == computer {
-        push_alias(&mut aliases, PathBuf::from("/"));
-    } else if node.path == Path::new("/") {
-        push_alias(&mut aliases, computer.to_path_buf());
-    } else if let Ok(rest) = node.path.strip_prefix(computer) {
-        push_alias(&mut aliases, Path::new("/").join(rest));
-    } else if let Ok(rest) = node.path.strip_prefix("/") {
-        push_alias(&mut aliases, computer.join(rest));
-    }
-    for alias in aliases {
-        lookup.entry(alias).or_insert_with(|| index.to_vec());
-    }
-}
-
-/// Iterative walk — deep home trees no longer risk stack overflow in lookup build.
-fn build_lookup(root: &SpaceEntity) -> HashMap<PathBuf, Vec<usize>> {
-    let mut lookup = HashMap::new();
-    let (home, data_home) = home_data_context();
-    let computer = computer_root();
-    let mut stack: Vec<(&SpaceEntity, Vec<usize>)> = vec![(root, Vec::new())];
-    while let Some((node, index)) = stack.pop() {
-        insert_lookup_aliases(node, &index, &mut lookup, &home, &data_home, &computer);
-        for (offset, child) in node.children.iter().enumerate().rev() {
-            let mut child_index = Vec::with_capacity(index.len() + 1);
-            child_index.extend_from_slice(&index);
-            child_index.push(offset);
-            stack.push((child, child_index));
-        }
-    }
-    lookup
-}
-
-fn node_at<'a>(root: &'a SpaceEntity, index: &[usize]) -> Option<&'a SpaceEntity> {
-    let mut node = root;
-    for offset in index {
-        node = node.children.get(*offset)?;
-    }
-    Some(node)
-}
-
 fn find_entity_in_volume<'a>(volume: &'a SpaceVolumeScan, folder: &Path) -> Option<&'a SpaceEntity> {
+    let root_aliases = path_aliases(&volume.root.path);
     for alias in path_aliases(folder) {
-        if alias == volume.scan_root || alias == volume.root.path {
+        if alias == volume.scan_root || root_aliases.contains(&alias) {
             return Some(&volume.root);
         }
-        if let Some(index) = volume.lookup.get(&alias) {
-            if let Some(node) = node_at(&volume.root, index) {
-                return Some(node);
+        for root_alias in &root_aliases {
+            if let Ok(rel) = alias.strip_prefix(root_alias) {
+                let mut cur = &volume.root;
+                let mut matched = true;
+                for comp in rel.components() {
+                    if let Some(next) = cur
+                        .children
+                        .iter()
+                        .find(|c| c.path.file_name() == Some(comp.as_os_str()))
+                    {
+                        cur = next;
+                    } else {
+                        matched = false;
+                        break;
+                    }
+                }
+                if matched {
+                    return Some(cur);
+                }
             }
         }
     }
@@ -1356,8 +1310,9 @@ mod tests {
                 children: vec![entity],
             };
         }
-        let lookup = build_lookup(&entity);
-        assert!(lookup.contains_key(&path));
+        let root_path = PathBuf::from("/tmp/space_deep_chain");
+        let vol = new_volume(root_path.clone(), entity);
+        assert!(find_entity_in_volume(&vol, &path).is_some());
     }
 
     #[test]

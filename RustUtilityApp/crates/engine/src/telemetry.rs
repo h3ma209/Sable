@@ -1,6 +1,9 @@
 //! SQLite-backed host and process telemetry for System Monitor history.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection};
@@ -98,8 +101,19 @@ impl TelemetryStore {
         let dir = home.join("Library/Application Support/Sable");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let path = dir.join(DB_NAME);
-        let store = Self { path };
-        store.migrate()?;
+        let store = Self { path: path.clone() };
+        static MIGRATED: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+        let cache = MIGRATED.get_or_init(|| Mutex::new(HashSet::new()));
+        let needs_migrate = cache
+            .lock()
+            .map(|g| !g.contains(&path))
+            .unwrap_or(true);
+        if needs_migrate {
+            store.migrate()?;
+            if let Ok(mut g) = cache.lock() {
+                g.insert(path);
+            }
+        }
         Ok(store)
     }
 
@@ -216,7 +230,10 @@ impl TelemetryStore {
             .map_err(|e| e.to_string())?;
         }
         tx.commit().map_err(|e| e.to_string())?;
-        self.prune_old()?;
+        static RECORD_COUNT: AtomicU64 = AtomicU64::new(0);
+        if RECORD_COUNT.fetch_add(1, Ordering::Relaxed) % 30 == 0 {
+            self.prune_old()?;
+        }
         Ok(host_id)
     }
 

@@ -1013,21 +1013,29 @@ pub fn start_space(mut state: Signal<AppState>, force_rescan: bool) {
     }
     let folder = PathBuf::from(&trimmed);
     if !force_rescan {
-        let cached = {
+        let (cached, collapsed) = {
             let s = state.read();
-            s.space_volume
+            let report = s
+                .space_volume
                 .as_ref()
-                .and_then(|volume| space_report_at(volume, &folder))
+                .and_then(|volume| space_report_at(volume, &folder));
+            let collapsed = s.space_volume.as_ref().is_some_and(|volume| {
+                !space_entry_size_only(volume, &folder)
+                    && engine::space_folder(volume, &folder)
+                        .is_some_and(|f| f.total > 0 && f.children.is_empty())
+            });
+            (report, collapsed)
         };
         if let Some(report) = cached {
-            let mut s = state.write();
-            s.space_root = report.root.display().to_string();
-            s.space = Some(report);
-            s.space_selected.clear();
-            s.space_selected_bytes.clear();
-            return;
-        }
-        if state.read().space_volume.is_some() {
+            if !collapsed {
+                let mut s = state.write();
+                s.space_root = report.root.display().to_string();
+                s.space = Some(report);
+                s.space_selected.clear();
+                s.space_selected_bytes.clear();
+                return;
+            }
+        } else if state.read().space_volume.is_some() {
             state.write().notice = Some(Notice {
                 ok: false,
                 text: "That folder is not in the current map. Press Scan to rebuild from the selected root.".into(),

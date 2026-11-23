@@ -81,11 +81,14 @@ pub fn AssistantScreen(mut state: Signal<AppState>) -> Element {
             screen: Screen::Assistant,
             subtitle: "Per-core CPU & P/E topology, macOS memory pressure, network & disk rates, interactive process tree & controls.",
             safety: Safety::ReadOnly,
-            action_label: Some(if auto_poll { "Pause Live".into() } else { "Resume Live".into() }),
+            action_label: Some(if auto_poll { "Pause Live".into() } else { "Start Live".into() }),
             action_enabled: !busy,
             on_action: Some(EventHandler::new(move |_| {
-                let current = state.read().auto_poll_monitor;
-                state.write().auto_poll_monitor = !current;
+                let next = !state.read().auto_poll_monitor;
+                state.write().auto_poll_monitor = next;
+                if next {
+                    sample_machine(state);
+                }
             })),
         }
         NoticeBanner { state }
@@ -124,6 +127,9 @@ pub fn AssistantScreen(mut state: Signal<AppState>) -> Element {
                 }
             }
             div { style: "display: flex; align-items: center; gap: 8px; flex-wrap: wrap;",
+                if !auto_poll {
+                    span { class: "monitor-off-pill", "Live monitoring off" }
+                }
                 button {
                     class: "btn btn-ghost",
                     disabled: monitor_sampling || busy,

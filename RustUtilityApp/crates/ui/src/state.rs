@@ -336,7 +336,7 @@ impl AppState {
             perf_tab: 0,
             clutter_tab: 0,
             clutter_filter: String::new(),
-            auto_poll_monitor: true,
+            auto_poll_monitor: false,
             monitor_sampling: false,
             monitor_analytics_loading: false,
             monitor_log_enabled: false,

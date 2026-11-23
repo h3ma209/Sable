@@ -18,6 +18,7 @@ struct MonitorState {
     components: Components,
     prev_core_ticks: Option<Vec<[u32; 4]>>,
     last_sample_at: Option<Instant>,
+    last_slow_refresh: Option<Instant>,
     processes_initialized: bool,
     cpu_brand: String,
     os_version: String,
@@ -65,6 +66,7 @@ impl MonitorState {
             components: Components::new_with_refreshed_list(),
             prev_core_ticks: None,
             last_sample_at: None,
+            last_slow_refresh: Some(Instant::now()),
             processes_initialized: false,
             cpu_brand,
             os_version,
@@ -318,7 +320,7 @@ fn collect_processes(
 
     for (pid, proc_) in system.processes() {
         let pid_u32 = pid.as_u32();
-        let (threads, nice) = read_task_threads_and_nice(pid_u32);
+        let threads = read_task_threads(pid_u32);
         total_threads = total_threads.saturating_add(threads as u64);
 
         let st = proc_.status();
@@ -342,12 +344,33 @@ fn collect_processes(
         let du = proc_.disk_usage();
         let disk_r = (du.read_bytes as f64 / dt_secs).round() as u64;
         let disk_w = (du.written_bytes as f64 / dt_secs).round() as u64;
-        let cmd = proc_
-            .cmd()
-            .iter()
-            .map(|s| s.to_string_lossy())
-            .collect::<Vec<_>>()
-            .join(" ");
+        let mut cmd = String::new();
+        for arg in proc_.cmd() {
+            let s = arg.to_string_lossy();
+            if s.is_empty() {
+                continue;
+            }
+            if !cmd.is_empty() {
+                if cmd.len() >= 200 {
+                    break;
+                }
+                cmd.push(' ');
+            }
+            let remain = 200usize.saturating_sub(cmd.len());
+            if remain == 0 {
+                break;
+            }
+            if s.len() <= remain {
+                cmd.push_str(&s);
+            } else {
+                let mut end = remain;
+                while end > 0 && !s.is_char_boundary(end) {
+                    end -= 1;
+                }
+                cmd.push_str(&s[..end]);
+                break;
+            }
+        }
 
         list.push(ProcessSnap {
             name: proc_.name().to_string_lossy().into_owned(),
@@ -360,7 +383,7 @@ fn collect_processes(
             virtual_bytes: proc_.virtual_memory(),
             mem_percent,
             threads,
-            nice,
+            nice: None,
             run_time_secs: proc_.run_time(),
             disk_read_bytes_per_sec: disk_r,
             disk_write_bytes_per_sec: disk_w,
@@ -374,18 +397,19 @@ fn collect_processes(
 }
 
 fn top_processes_from(all: &[ProcessSnap], by_cpu: bool, limit: usize) -> Vec<ProcessSnap> {
-    let mut rows = all.to_vec();
+    let mut indices: Vec<usize> = (0..all.len()).collect();
     if by_cpu {
-        rows.sort_by(|a, b| {
-            b.cpu_percent
-                .partial_cmp(&a.cpu_percent)
+        indices.sort_by(|&a, &b| {
+            all[b]
+                .cpu_percent
+                .partial_cmp(&all[a].cpu_percent)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
     } else {
-        rows.sort_by(|a, b| b.memory_bytes.cmp(&a.memory_bytes));
+        indices.sort_by(|&a, &b| all[b].memory_bytes.cmp(&all[a].memory_bytes));
     }
-    rows.truncate(limit);
-    rows
+    indices.truncate(limit);
+    indices.into_iter().map(|i| all[i].clone()).collect()
 }
 
 pub fn boot_volume_bytes() -> VolumeBytes {
@@ -707,7 +731,7 @@ fn read_memory_breakdown() -> Option<MemoryBreakdown> {
 }
 
 #[cfg(target_os = "macos")]
-fn read_task_threads_and_nice(pid: u32) -> (u32, Option<i32>) {
+fn read_task_threads(pid: u32) -> u32 {
     let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of::<libc::proc_taskinfo>() as libc::c_int;
     let ret = unsafe {
@@ -719,11 +743,21 @@ fn read_task_threads_and_nice(pid: u32) -> (u32, Option<i32>) {
             size,
         )
     };
-    let threads = if ret == size && info.pti_threadnum > 0 {
+    if ret == size && info.pti_threadnum > 0 {
         info.pti_threadnum as u32
     } else {
         0
-    };
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_task_threads(_pid: u32) -> u32 {
+    0
+}
+
+#[cfg(target_os = "macos")]
+fn read_task_threads_and_nice(pid: u32) -> (u32, Option<i32>) {
+    let threads = read_task_threads(pid);
 
     let nice = unsafe {
         let err_ptr = libc::__error();
@@ -1251,10 +1285,18 @@ fn machine_sample_inner(include_processes: bool) -> MachineSample {
     st.system.refresh_memory_specifics(MemoryRefreshKind::everything());
     st.system.refresh_cpu_usage();
     st.networks.refresh(true);
-    st.disks.refresh(true);
-    st.components.refresh(true);
+    let slow_due = st
+        .last_slow_refresh
+        .is_none_or(|t| t.elapsed() >= Duration::from_secs(15));
+    if slow_due {
+        st.disks.refresh(true);
+        st.components.refresh(true);
+        if include_processes {
+            st.users.refresh();
+        }
+        st.last_slow_refresh = Some(Instant::now());
+    }
     if include_processes {
-        st.users.refresh();
         st.system.refresh_processes_specifics(ProcessesToUpdate::All, true, pk);
         st.processes_initialized = true;
     }
@@ -1473,12 +1515,33 @@ pub fn inspect_process_details(pid: u32) -> Option<ProcessDetail> {
             .map(|u| u.name().to_string())
             .or_else(|| proc_.user_id().map(|uid| uid.to_string()))
             .unwrap_or_else(|| "-".into());
-        let cmd = proc_
-            .cmd()
-            .iter()
-            .map(|s| s.to_string_lossy())
-            .collect::<Vec<_>>()
-            .join(" ");
+        let mut cmd = String::new();
+        for arg in proc_.cmd() {
+            let s = arg.to_string_lossy();
+            if s.is_empty() {
+                continue;
+            }
+            if !cmd.is_empty() {
+                if cmd.len() >= 200 {
+                    break;
+                }
+                cmd.push(' ');
+            }
+            let remain = 200usize.saturating_sub(cmd.len());
+            if remain == 0 {
+                break;
+            }
+            if s.len() <= remain {
+                cmd.push_str(&s);
+            } else {
+                let mut end = remain;
+                while end > 0 && !s.is_char_boundary(end) {
+                    end -= 1;
+                }
+                cmd.push_str(&s[..end]);
+                break;
+            }
+        }
 
         let mut ancestry = Vec::new();
         let mut visited = HashSet::from([pid]);
