@@ -122,6 +122,51 @@ See [SECURITY.md](SECURITY.md) for disclosure and review notes.
 
 ---
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="assets/screenshots/home.png" alt="Sable Home Overview"><br>
+      <sub><b>Home</b> — System health, disk usage, live telemetry &amp; Smart Audit</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="assets/screenshots/free-up-space.png" alt="Sable Free Up Space"><br>
+      <sub><b>Free Up Space</b> — Caches, logs &amp; dev junk</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="assets/screenshots/space-lens.png" alt="Sable Space Lens"><br>
+      <sub><b>Space Lens</b> — Cached directory tree &amp; drill-down</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="assets/screenshots/big-downloads.png" alt="Sable Big Downloads"><br>
+      <sub><b>Big Downloads</b> — Large files in ~/Downloads (50 MB+)</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="assets/screenshots/duplicates.png" alt="Sable Duplicates"><br>
+      <sub><b>Duplicates</b> — Duplicate file groups &amp; reclaimable space</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="assets/screenshots/system-monitor.png" alt="Sable System Monitor"><br>
+      <sub><b>System Monitor</b> — Per-core P/E CPU, memory &amp; live I/O</sub>
+    </td>
+  </tr>
+</table>
+
+<details>
+<summary>More: System Monitor — Top Apps, Volumes, Interfaces &amp; Sensors</summary>
+<br>
+<p align="center">
+  <img src="assets/screenshots/system-monitor-details.png" width="850" alt="Sable System Monitor Processes and Sensors">
+</p>
+</details>
+
+---
+
 ## Keyboard shortcuts
 
 - `Cmd+1` → Overview

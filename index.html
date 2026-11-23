@@ -351,6 +351,105 @@
       height: auto;
     }
 
+    /* Screenshots Showcase */
+    .showcase {
+      margin-bottom: 96px;
+    }
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 16px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .section-header h2 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .section-sub {
+      color: var(--text-muted);
+      font-size: 0.92rem;
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+    .tab-btn {
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 0.84rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tab-btn:hover {
+      border-color: var(--border-hover);
+      color: var(--text);
+    }
+    .tab-btn.active {
+      background: rgba(30, 215, 96, 0.12);
+      border-color: rgba(30, 215, 96, 0.35);
+      color: var(--accent);
+    }
+    .showcase-frame {
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+    }
+    .showcase-frame img {
+      display: block;
+      width: 100%;
+      height: auto;
+      cursor: zoom-in;
+    }
+    .showcase-caption {
+      padding: 14px 20px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.86rem;
+      color: var(--text-muted);
+      flex-wrap: wrap;
+    }
+    .showcase-caption strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    /* Lightbox */
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.88);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 100;
+      cursor: zoom-out;
+    }
+    .lightbox.open { display: flex; }
+    .lightbox img {
+      max-width: 95vw;
+      max-height: 92vh;
+      border-radius: 12px;
+      border: 1px solid var(--border-hover);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
+    }
+
     @media (max-width: 820px) {
       h1 { font-size: 2.5rem; }
       .hero-preview { margin: 28px auto 44px; }
@@ -370,6 +469,7 @@
       </a>
       <div class="nav-links">
         <a href="#features" class="nav-link">Features</a>
+        <a href="#screenshots" class="nav-link">Screenshots</a>
         <a href="https://github.com/h3ma209/Sable/releases" class="nav-link">Releases</a>
         <a href="https://github.com/h3ma209/Sable" class="nav-link">Source</a>
       </div>
@@ -479,6 +579,35 @@
       </div>
     </div>
 
+    <section id="screenshots" class="showcase">
+      <div class="section-header">
+        <div>
+          <h2>Inside Sable</h2>
+          <p class="section-sub">Every module runs locally in a native macOS window — click any screenshot to zoom.</p>
+        </div>
+      </div>
+      <div class="tabs" role="tablist" aria-label="App screenshots">
+        <button class="tab-btn active" role="tab" aria-selected="true" data-src="assets/screenshots/home.png" data-title="Home" data-desc="System health score, disk usage, live telemetry, active consumers, and Smart Audit queue.">Home</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-src="assets/screenshots/free-up-space.png" data-title="Free Up Space" data-desc="User caches, logs, diagnostic reports, and dev junk with Finder reveal.">Free Up Space</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-src="assets/screenshots/space-lens.png" data-title="Space Lens" data-desc="Cached directory tree with instant drill-down, dev artifact badges, and Finder reveal.">Space Lens</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-src="assets/screenshots/big-downloads.png" data-title="Big Downloads" data-desc="Surfaces large files (50 MB+) in ~/Downloads sorted by size or name.">Big Downloads</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-src="assets/screenshots/duplicates.png" data-title="Duplicates" data-desc="Finds duplicate file groups across your folder tree with reclaimable size totals.">Duplicates</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-src="assets/screenshots/system-monitor.png" data-title="System Monitor" data-desc="Per-core P/E CPU load, memory architecture breakdown, and live network/disk I/O.">System Monitor</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-src="assets/screenshots/system-monitor-details.png" data-title="Processes &amp; Sensors" data-desc="Top CPU &amp; memory app groups, mounted APFS volumes, network interfaces, and thermal sensors.">Processes &amp; Sensors</button>
+      </div>
+      <div class="showcase-frame">
+        <img id="showcase-img" src="assets/screenshots/home.png" alt="Sable Home overview" loading="lazy">
+        <div class="showcase-caption">
+          <div><strong id="showcase-title">Home</strong> — <span id="showcase-desc">System health score, disk usage, live telemetry, active consumers, and Smart Audit queue.</span></div>
+          <span>Click image to enlarge</span>
+        </div>
+      </div>
+    </section>
+
+    <div id="lightbox" class="lightbox" aria-hidden="true">
+      <img id="lightbox-img" src="" alt="">
+    </div>
+
     <section class="transparency">
       <h2>Transparency</h2>
       <p>Routine cleanup stays in user space. The engine only batch-trashes paths it surveyed under your home folder (caches, logs, DerivedData, and similar). Everything else needs explicit per-file confirmation.</p>
@@ -520,6 +649,47 @@
         }
       })
       .catch(() => {});
+
+    const tabs = document.querySelectorAll('.tab-btn');
+    const showcaseImg = document.getElementById('showcase-img');
+    const showcaseTitle = document.getElementById('showcase-title');
+    const showcaseDesc = document.getElementById('showcase-desc');
+    const lightbox = document.getElementById('lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
+
+    tabs.forEach(btn => {
+      btn.addEventListener('click', () => {
+        tabs.forEach(t => {
+          t.classList.remove('active');
+          t.setAttribute('aria-selected', 'false');
+        });
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        showcaseImg.src = btn.dataset.src;
+        showcaseImg.alt = 'Sable ' + btn.dataset.title;
+        showcaseTitle.textContent = btn.dataset.title;
+        showcaseDesc.textContent = btn.dataset.desc;
+      });
+    });
+
+    showcaseImg.addEventListener('click', () => {
+      lightboxImg.src = showcaseImg.src;
+      lightboxImg.alt = showcaseImg.alt;
+      lightbox.classList.add('open');
+      lightbox.setAttribute('aria-hidden', 'false');
+    });
+
+    lightbox.addEventListener('click', () => {
+      lightbox.classList.remove('open');
+      lightbox.setAttribute('aria-hidden', 'true');
+    });
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && lightbox.classList.contains('open')) {
+        lightbox.classList.remove('open');
+        lightbox.setAttribute('aria-hidden', 'true');
+      }
+    });
   </script>
 </body>
 </html>
